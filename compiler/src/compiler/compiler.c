@@ -2095,7 +2095,6 @@ static InstrIndex _compile_loop(FunctionCompiler* compiler,
 	for (size_t i = 0; i < compiler->var_count; i += 1) {
 		if (compiler->vars[i] == NULL) {
 			var_phis[i] = INVALID_INSTR_INDEX;
-			// This variable hasn't been yet defined -> don't create a phi
 			continue;
 		}
 
@@ -2304,9 +2303,18 @@ static InstrIndex _compile_do_while_loop(FunctionCompiler* compiler,
 	for (size_t i = 0; i < compiler->var_count; i += 1) {
 		if (compiler->vars[i] == NULL) {
 			var_phis[i] = INVALID_INSTR_INDEX;
-		} else {
-			var_phis[i] = instr_new_empty_phi(instr_buffer, instr_allocator);
+			continue;
 		}
+
+		TypeKind var_type_kind = compiler->vars[i]->type.kind;
+		if (var_type_kind == TYPE_STRUCT
+				|| var_type_kind == TYPE_UNION
+				|| var_type_kind == TYPE_ARRAY) {
+			var_phis[i] = original_var_values[i];
+			continue;
+		}
+
+		var_phis[i] = instr_new_empty_phi(instr_buffer, instr_allocator);
 	}
 
 	for (size_t i = 0; i < arg_count; i += 1) {
