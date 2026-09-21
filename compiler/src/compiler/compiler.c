@@ -2244,6 +2244,212 @@ static InstrIndex _compile_loop(FunctionCompiler* compiler,
 	return post_loop_region_index;
 }
 
+static InstrIndex _compile_for_loop(FunctionCompiler* compiler,
+		InstrIndex current_region,
+		AstNode* node) {
+	profile_scope_start(__func__);
+	assert(node->kind == AST_NODE_FOR_LOOP);
+
+	ArenaRegion temp = arena_begin_temp(compiler->temp_allocator);
+
+	// 1. Setup loop state
+	LoopSwitchState current_loop_switch_state = (LoopSwitchState) {
+		.parent = compiler->loop_switch_state,
+		.control_flow_stmts = NULL,
+		.node = node,
+	};
+
+	compiler->loop_switch_state = &current_loop_switch_state;
+
+	// 2. Setup loop header
+	size_t arg_count = compiler->function->proto.parameter_count;
+	InstrBuffer* instr_buffer = &compiler->instr_buffer;
+	Arena* instr_allocator = compiler->instr_allocator;
+
+	Instr* region_instr = instr_buffer_at(instr_buffer, current_region);
+
+	InstrIndex pre_loop_region_index;
+
+	// Jump to `pre_loop_region`
+	{
+		InstrIndex jump_to_pre_loop = instr_new_jump(instr_buffer,
+				instr_allocator,
+				INVALID_INSTR_INDEX,
+				&compiler->io_state);
+
+		pre_loop_region_index = instr_new_region(instr_buffer, instr_allocator);
+		instr_set_jump_target(instr_buffer, jump_to_pre_loop, pre_loop_region_index);
+
+		region_instr->region.last_instr = jump_to_pre_loop;
+	}
+
+	// Compile the `init_stmt`. So that any variables defined by it, get initialized and later get
+	// replaced with a phi.
+	if (node->for_loop.init_stmt) {
+		_compile_statement(compiler, node->for_loop.init_stmt);
+	}
+
+	// 3. Original var & arg values
+	InstrIndex* original_var_values = compiler->var_values;
+	InstrIndex* original_arg_values = compiler->arg_states;
+
+	InstrIndex* var_phis = arena_alloc_array(compiler->temp_allocator,
+			InstrIndex,
+			compiler->var_count);
+	InstrIndex* arg_phis = arena_alloc_array(compiler->temp_allocator,
+			InstrIndex,
+			arg_count);
+
+	// 4. Replace current variables and arguments with phis
+	for (size_t i = 0; i < compiler->var_count; i += 1) {
+		if (compiler->vars[i] == NULL) {
+			var_phis[i] = INVALID_INSTR_INDEX;
+			continue;
+		}
+
+		TypeKind var_type_kind = compiler->vars[i]->type.kind;
+		if (var_type_kind == TYPE_STRUCT
+				|| var_type_kind == TYPE_UNION
+				|| var_type_kind == TYPE_ARRAY) {
+			var_phis[i] = original_var_values[i];
+			continue;
+		}
+
+		var_phis[i] = instr_new_empty_phi(instr_buffer, instr_allocator);
+	}
+
+	for (size_t i = 0; i < arg_count; i += 1) {
+		arg_phis[i] = instr_new_empty_phi(instr_buffer, instr_allocator);
+	}
+
+	// 5. Set the created phis as current variable values
+	InstrIndex* var_values_for_body = arena_alloc_array(compiler->temp_allocator,
+			InstrIndex,
+			compiler->var_count);
+	InstrIndex* arg_values_for_body = arena_alloc_array(compiler->temp_allocator,
+			InstrIndex,
+			arg_count);
+
+	array_copy(var_values_for_body, var_phis, compiler->var_count);
+	array_copy(arg_values_for_body, arg_phis, arg_count);
+
+	compiler->var_values = var_values_for_body;
+	compiler->arg_states = arg_values_for_body;
+
+	// 6. Compile the condition
+	InstrIndex branch_index = INVALID_INSTR_INDEX;
+	InstrIndex condition_region = INVALID_INSTR_INDEX;
+	InstrIndex pre_loop_to_body_jump = INVALID_INSTR_INDEX;
+	if (node->for_loop.condition) {
+		InstrIndex jump_to_condition = instr_new_jump(instr_buffer,
+				instr_allocator,
+				INVALID_INSTR_INDEX,
+				&compiler->io_state);
+
+		condition_region = instr_new_region(instr_buffer, instr_allocator);
+		instr_set_jump_target(instr_buffer, jump_to_condition, condition_region);
+		instr_region_set_last(instr_buffer, pre_loop_region_index, jump_to_condition);
+
+		branch_index = instr_buffer_append(instr_buffer, instr_allocator);
+		Instr* branch = instr_buffer_at(instr_buffer, branch_index);
+		branch->kind = INSTR_BRANCH;
+		branch->branch.condition = _compile_expr_to_bool(compiler, node->for_loop.condition);
+		branch->branch.io_state = compiler->io_state;
+
+		compiler->io_state = instr_new_io_state(instr_buffer, instr_allocator, INVALID_INSTR_INDEX);
+
+		instr_region_set_last(instr_buffer, condition_region, branch_index);
+	} else {
+		// Now, that this loop doesn't have a `condition_expr`, there is also no `condition_region`,
+		// which means we can directly jump to the body of the loop.
+		//
+		// Here jump target is `INVALID_INSTR_INDEX`, since we haven't yet compiled the body, and
+		// thus don't know its `initial_region`
+		pre_loop_to_body_jump = instr_new_jump(instr_buffer,
+				instr_allocator,
+				INVALID_INSTR_INDEX,
+				&compiler->io_state);
+
+		instr_region_set_last(instr_buffer, pre_loop_region_index, pre_loop_to_body_jump);
+	}
+
+	// 7. Compile the body
+	Scope* body_scope = _loop_body_scope(node);
+	CompiledBlockRegions body_block = _compile_scope(compiler, body_scope);
+
+	// 8. Compile `advance_expr` right at the end of the body.
+	if (node->for_loop.advance_expr) {
+		if (!instr_region_finished(instr_buffer, body_block.final_region)) {
+			// If the loop body already ends with a control instruction, whether it's break,
+			// continue or a return, the `advance_expr` won't be rechable any more.
+			_compile_expr(compiler, node->for_loop.advance_expr);
+		}
+	}
+
+	// 9. Merge values from before the loop and from the last iteration
+	_merge_pre_loop_and_inner_values(compiler,
+			var_phis,
+			arg_phis,
+			original_var_values,
+			original_arg_values,
+			pre_loop_region_index,
+			body_block.final_region);
+
+	// 10. Set post loop values to phis
+	array_copy(original_var_values, var_phis, compiler->var_count);
+	array_copy(original_arg_values, arg_phis, arg_count);
+
+	compiler->var_values = original_var_values;
+	compiler->arg_states = original_arg_values;
+
+	// 11. Start the next iteration. Jump to the start of the loop.
+	if (!instr_region_finished(instr_buffer, body_block.final_region)) {
+		InstrIndex post_loop_jump_target = node->for_loop.condition
+			? condition_region
+			: body_block.initial_region;
+
+		assert(post_loop_jump_target.value != INVALID_INSTR_INDEX.value);
+
+		InstrIndex post_loop_jump = instr_new_jump(instr_buffer,
+				instr_allocator,
+				post_loop_jump_target,
+				&compiler->io_state);
+
+		instr_region_set_last(instr_buffer, body_block.final_region, post_loop_jump);
+	}
+
+	// 12. Fix the jump targets, of the branch instruction
+	if (!node->for_loop.condition) {
+		assert(pre_loop_to_body_jump.value != INVALID_INSTR_INDEX.value);
+		instr_set_jump_target(instr_buffer, pre_loop_to_body_jump, body_block.initial_region);
+	}
+
+	InstrIndex post_loop_region_index = instr_new_region(instr_buffer, instr_allocator);
+
+	if (node->for_loop.condition) {
+		assert(branch_index.value != INVALID_INSTR_INDEX.value);
+
+		Instr* branch = instr_buffer_at(instr_buffer, branch_index);
+		branch->branch.true_region = body_block.initial_region;
+		branch->branch.false_region = post_loop_region_index;
+	}
+
+	// 13. Fix the jumps inserted by `break` and `continue` statements.
+	_fix_loop_control_jumps(instr_buffer,
+			compiler->loop_switch_state->control_flow_stmts,
+			post_loop_region_index, 
+			condition_region);
+	
+	_reset_variables_in_scope(compiler, node->for_loop.loop_scope);
+
+	arena_end_temp(temp);
+
+	_restore_loop_switch_state(compiler);
+
+	profile_scope_end();
+	return post_loop_region_index;
+}
+
 // Similar to `_compile_loop`.
 static InstrIndex _compile_do_while_loop(FunctionCompiler* compiler,
 		InstrIndex current_region,
@@ -3195,15 +3401,9 @@ static void _compile_single_node(FunctionCompiler* compiler,
 			unreachable();
 		}
 		break;
-	case AST_NODE_FOR_LOOP: {
-		*region_instr_index = _compile_loop(compiler,
-				*region_instr_index,
-				node,
-				node->for_loop.init_stmt,
-				node->for_loop.condition,
-				node->for_loop.advance_expr);
+	case AST_NODE_FOR_LOOP:
+		*region_instr_index = _compile_for_loop(compiler, *region_instr_index, node);
 		break;
-	}
 	case AST_NODE_BREAK:
 	case AST_NODE_CONTINUE: {
 

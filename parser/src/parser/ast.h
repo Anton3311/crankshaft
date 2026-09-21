@@ -730,6 +730,7 @@ struct WhileLoop {
 };
 
 struct ForLoop {
+	// Loop Scope that includes the `init_stmt`
 	Scope* loop_scope;
 	AstNode* init_stmt;
 	Expr* condition;
