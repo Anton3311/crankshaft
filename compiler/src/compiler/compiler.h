@@ -86,11 +86,15 @@ typedef struct {
 	//
 	// Invariant `var_count == function->var_count`.
 	size_t var_count;
-	// The size is `var_count`.
-	// Index using the variable id.
+	// The size is `var_count`. Index using the variable id.
 	//
-	// Each element is only assigned when the varialbe definition is encountered, otherwise it stays
-	// as `NULL`.
+	// This array stores variables accessible in the scope of the node the compiler is currently
+	// processing.
+	//
+	// * Each element is only assigned when the varialbe definition is encountered, otherwise it
+	//   stays as `NULL`.
+	// * Whenever the compiler leaves a scope, all the variables defined in that scope are reset
+	//   back to `NULL` together with their instruction values.
 	const Variable** vars;
 	// The size is `var_count`.
 	// Index using the variable id.
@@ -100,8 +104,8 @@ typedef struct {
 	// The size is `var_count`.
 	// Index using the variable id.
 	//
-	// If variable definition has already been encountered, the corresponding element will contain a
-	// valid instruction, otherwise `INVALID_INSTR_INDEX`
+	// Elements are assigned in the same way as for `vars`. If the variable is not accessible,
+	// stores `INVALID_INSTR_INDEX`.
 	InstrIndex* var_values;
 	InstrIndex* arg_states;
 

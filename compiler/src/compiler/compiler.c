@@ -1924,11 +1924,6 @@ static void _merge_pre_loop_and_inner_values(FunctionCompiler* compiler,
 			continue;
 		}
 
-		const Scope* var_parent_scope = compiler->var_parent_scopes[i];
-		if (var_parent_scope->id > body_scope->id) {
-			continue;
-		}
-
 		TypeKind var_type_kind = compiler->vars[i]->type.kind;
 		if (var_type_kind == TYPE_STRUCT
 				|| var_type_kind == TYPE_UNION
@@ -2096,18 +2091,10 @@ static InstrIndex _compile_loop(FunctionCompiler* compiler,
 			arg_count);
 
 	// Replace current variables and arguments with phis
-	Scope* body_scope = _loop_body_scope(node);
 	for (size_t i = 0; i < compiler->var_count; i += 1) {
 		if (compiler->vars[i] == NULL) {
 			var_phis[i] = INVALID_INSTR_INDEX;
 			// This variable hasn't been yet defined -> don't create a phi
-			continue;
-		}
-
-		const Scope* var_parent_scope = compiler->var_parent_scopes[i];
-		if (var_parent_scope->id > body_scope->id) {
-			var_phis[i] = INVALID_INSTR_INDEX;
-			// This variable is first defined after the loop, so it's irrelevant here.
 			continue;
 		}
 
@@ -2179,6 +2166,7 @@ static InstrIndex _compile_loop(FunctionCompiler* compiler,
 	}
 
 	// Compile the body
+	Scope* body_scope = _loop_body_scope(node);
 	CompiledBlockRegions body_block = _compile_scope(compiler, body_scope);
 
 	// Compile `advance_expr` right at the end of the body.
@@ -2312,22 +2300,12 @@ static InstrIndex _compile_do_while_loop(FunctionCompiler* compiler,
 			InstrIndex,
 			arg_count);
 
-	const Scope* body_scope = _loop_body_scope(node);
 	for (size_t i = 0; i < compiler->var_count; i += 1) {
 		if (compiler->vars[i] == NULL) {
-			// This variable hasn't been yet defined -> don't create a phi
 			var_phis[i] = INVALID_INSTR_INDEX;
-			continue;
+		} else {
+			var_phis[i] = instr_new_empty_phi(instr_buffer, instr_allocator);
 		}
-
-		const Scope* var_parent_scope = compiler->var_parent_scopes[i];
-		if (var_parent_scope->id > body_scope->id) {
-			// This variable is first defined after the loop, so it's irrelevant here.
-			var_phis[i] = INVALID_INSTR_INDEX;
-			continue;
-		}
-
-		var_phis[i] = instr_new_empty_phi(instr_buffer, instr_allocator);
 	}
 
 	for (size_t i = 0; i < arg_count; i += 1) {
@@ -2349,6 +2327,7 @@ static InstrIndex _compile_do_while_loop(FunctionCompiler* compiler,
 	compiler->arg_states = arg_values_for_body;
 
 	// 5. Compile the body
+	const Scope* body_scope = _loop_body_scope(node);
 	CompiledBlockRegions body_block = _compile_scope(compiler, node->while_loop.body_scope);
 
 	// 6. Link the `jump_to_first_iteration`
@@ -2557,21 +2536,12 @@ static InstrIndex _compile_if_statement(FunctionCompiler* compiler,
 				continue;
 			}
 
-			const Scope* var_parent_scope = compiler->var_parent_scopes[i];
-			if (var_parent_scope->id > if_parent_scope->id) {
-				// The variable is defined deeper down the scopes hierarachy,
-				// so it must have been defined in one of the if statement
-				// branches. Which means phi placement doesn't apply here.
-				continue;
-			}
-
 			bool assigned_in_true_path =
 				var_values_for_true_path[i].value != original_var_values[i].value;
 			bool assigned_in_false_path =
 				var_values_for_false_path[i].value != original_var_values[i].value;
 
 			if (!assigned_in_true_path && !assigned_in_false_path) {
-				// No need to place a phi node, since no new values were assigned
 				continue;
 			}
 
@@ -2591,7 +2561,6 @@ static InstrIndex _compile_if_statement(FunctionCompiler* compiler,
 				arg_values_for_false_path[i].value != original_arg_values[i].value;
 
 			if (!assigned_in_true_path && !assigned_in_false_path) {
-				// No need to place a phi node, since no new values were assigned
 				continue;
 			}
 
