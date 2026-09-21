@@ -4317,9 +4317,14 @@ static AstNode* _parser_parse_switch(Parser* parser) {
 		bool previous_inside_a_switch = parser->inside_a_switch;
 		parser->inside_a_switch = true;
 
-		node->switch_stmt.body = _parser_parse_single_node(parser, body_token);
+		AstNode* body = _parser_parse_single_node(parser, body_token);
+		assert(body->kind == AST_NODE_BLOCK);
+
+		node->switch_stmt.body = &body->block;
 
 		parser->inside_a_switch = previous_inside_a_switch;
+	} else {
+		node->switch_stmt.body = arena_alloc_zeroed(parser->ast_allocator, Scope);
 	}
 
 	profile_scope_end();

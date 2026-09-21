@@ -132,6 +132,7 @@ static void _compile_single_node(FunctionCompiler* compiler,
 		InstrIndex* region_instr_index);
 
 static CompiledBlockRegions _compile_scope(FunctionCompiler* compiler, Scope* scope);
+static void _reset_variables_in_scope(FunctionCompiler* compiler, const Scope* scope);
 
 static void _compile_statement(FunctionCompiler* compiler, AstNode* node);
 
@@ -2813,8 +2814,6 @@ static void _compile_switch(FunctionCompiler* compiler,
 	InstrIndex true_region_index = initial_region_index;
 	InstrIndex false_region_index = initial_region_index;
 
-	assert(stmt->switch_stmt.body->kind == AST_NODE_BLOCK);
-
 	InstrIndex default_case_region = INVALID_INSTR_INDEX;
 
 	size_t arg_count = compiler->function->proto.parameter_count;
@@ -2830,7 +2829,7 @@ static void _compile_switch(FunctionCompiler* compiler,
 	array_copy(initial_arg_values, compiler->arg_states, arg_count);
 	array_copy(initial_var_values, compiler->var_values, var_count);
 
-	AstNode* first_body_node = stmt->switch_stmt.body->block.nodes.first;
+	AstNode* first_body_node = stmt->switch_stmt.body->nodes.first;
 	for (AstNode* child = first_body_node; child != NULL; child = child->next) {
 		if (child->kind == AST_NODE_CASE) {
 			InstrIndex new_true_region = instr_new_region(instr_buffer, instr_allocator);
@@ -2979,6 +2978,8 @@ static void _compile_switch(FunctionCompiler* compiler,
 			}
 		}
 	}
+
+	_reset_variables_in_scope(compiler, stmt->switch_stmt.body);
 
 	{
 		bool fallthrough_possible = false;

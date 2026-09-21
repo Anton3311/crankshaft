@@ -1655,7 +1655,7 @@ void print_single_node(PrinterState* printer, const AstNode* node) {
 		print_expr(printer, node->switch_stmt.expr);
 
 		printer_field(printer, "body");
-		print_single_node(printer, node->switch_stmt.body);
+		print_scope(printer, node->switch_stmt.body);
 
 		printer_end_struct(printer);
 		break;

@@ -743,7 +743,7 @@ struct ForLoop {
 
 struct Switch {
 	Expr* expr;
-	AstNode* body;
+	Scope* body;
 	uint32_t case_count;
 	bool has_default;
 };
