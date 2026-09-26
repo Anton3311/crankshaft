@@ -153,6 +153,16 @@ IdentifierScope* ident_storage_begin_scope(IdentifierStorage* storage);
 void ident_storage_end_scope(IdentifierStorage* storage);
 
 //
+// Loop & Switch State
+//
+
+typedef struct ParserLoopOrSwitchState ParserLoopOrSwitchState;
+struct ParserLoopOrSwitchState {
+	AstNode* node;
+	ParserLoopOrSwitchState* parent;
+};
+
+//
 // Parser
 //
 
@@ -175,6 +185,8 @@ typedef struct {
 	Function* current_function;
 
 	AstNode* dummy_node;
+	
+	ParserLoopOrSwitchState* loop_or_switch_state;
 } Parser;
 
 void parser_init(Parser* parser,

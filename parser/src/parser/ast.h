@@ -727,6 +727,9 @@ struct WhileLoop {
 	WhileLoopConditionKind condition_kind;
 	Expr condition;
 	Scope* body_scope;
+
+	uint32_t break_count;
+	uint32_t continue_count;
 };
 
 struct ForLoop {
@@ -736,6 +739,9 @@ struct ForLoop {
 	Expr* condition;
 	Expr* advance_expr;
 	Scope* body_scope;
+
+	uint32_t break_count;
+	uint32_t continue_count;
 };
 
 //
@@ -745,7 +751,7 @@ struct ForLoop {
 struct Switch {
 	Expr* expr;
 	Scope* body;
-	uint32_t case_count;
+	uint32_t break_count;
 	bool has_default;
 };
 
