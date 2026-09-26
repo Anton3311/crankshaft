@@ -2244,6 +2244,123 @@ static InstrIndex _compile_loop(FunctionCompiler* compiler,
 	return post_loop_region_index;
 }
 
+static void _merge_final_for_loop_phis(FunctionCompiler* compiler,
+		ControlFlowStmt* control_stmts,
+		InstrIndex phi_index,
+		size_t value_index,
+		bool is_var) {
+	size_t break_count = 0;
+	for (ControlFlowStmt* stmt = control_stmts; stmt != NULL; stmt = stmt->next) {
+		if (stmt->kind == CONTROL_FLOW_BREAK) {
+			break_count += 1;
+		}
+	}
+
+	InstrBuffer* instr_buffer = &compiler->instr_buffer;
+	Arena* instr_allocator = compiler->instr_allocator;
+
+	Instr* phi = instr_buffer_at(instr_buffer, phi_index);
+	assert(phi->kind == INSTR_PHI);
+	assert(phi->phi.variants.start == UINT16_MAX);
+	assert(phi->phi.variants.count == UINT16_MAX);
+
+	size_t variant_count = break_count;
+
+	InstrInputs select_inputs_buffer = instr_allocate_inputs_array(instr_buffer, variant_count);
+	InstrIndex* select_inputs = &instr_buffer->inputs_buffer[select_inputs_buffer.start];
+
+	size_t variant_index = 0;
+	for (ControlFlowStmt* stmt = control_stmts; stmt != NULL; stmt = stmt->next) {
+		if (stmt->kind != CONTROL_FLOW_BREAK) {
+			continue;
+		}
+
+		assert(variant_index < variant_count);
+
+		InstrIndex select_index = instr_buffer_append(instr_buffer, instr_allocator);
+		Instr* select = instr_buffer_at(instr_buffer, select_index);
+		select->kind = INSTR_SELECT;
+		select->select.region = stmt->region;
+
+		if (is_var) {
+			select->select.value = stmt->var_values[value_index];
+		} else {
+			select->select.value = stmt->arg_values[value_index];
+		}
+
+		assert(select->select.value.value != INVALID_INSTR_INDEX.value);
+
+		select_inputs[variant_index] = select_index;
+
+		variant_index += 1;
+	}
+
+	assert(variant_index == variant_count);
+
+	phi->kind = INSTR_PHI;
+	phi->phi.variants = select_inputs_buffer;
+}
+
+static InstrIndex _merge_values_from_last_iteration(FunctionCompiler* compiler,
+		ControlFlowStmt* control_stmts,
+		size_t value_index,
+		bool is_var) {
+
+	size_t continue_count = 0;
+	for (ControlFlowStmt* stmt = control_stmts; stmt != NULL; stmt = stmt->next) {
+		if (stmt->kind == CONTROL_FLOW_CONTINUE) {
+			continue_count += 1;
+		}
+	}
+
+	InstrBuffer* instr_buffer = &compiler->instr_buffer;
+	Arena* instr_allocator = compiler->instr_allocator;
+
+	InstrIndex phi_index = instr_buffer_push(instr_buffer, instr_allocator, (Instr) {
+		.kind = INSTR_PHI,
+		.phi = {}
+	});
+	Instr* phi = instr_buffer_at(instr_buffer, phi_index);
+
+	size_t variant_count = continue_count;
+
+	InstrInputs select_inputs_buffer = instr_allocate_inputs_array(instr_buffer, variant_count);
+	InstrIndex* select_inputs = &instr_buffer->inputs_buffer[select_inputs_buffer.start];
+
+	size_t variant_index = 0;
+	for (ControlFlowStmt* stmt = control_stmts; stmt != NULL; stmt = stmt->next) {
+		if (stmt->kind != CONTROL_FLOW_CONTINUE) {
+			continue;
+		}
+
+		assert(variant_index < variant_count);
+
+		InstrIndex select_index = instr_buffer_append(instr_buffer, instr_allocator);
+		Instr* select = instr_buffer_at(instr_buffer, select_index);
+		select->kind = INSTR_SELECT;
+		select->select.region = stmt->region;
+
+		if (is_var) {
+			select->select.value = stmt->var_values[value_index];
+		} else {
+			select->select.value = stmt->arg_values[value_index];
+		}
+
+		assert(select->select.value.value != INVALID_INSTR_INDEX.value);
+
+		select_inputs[variant_index] = select_index;
+
+		variant_index += 1;
+	}
+
+	assert(variant_index == variant_count);
+
+	phi->kind = INSTR_PHI;
+	phi->phi.variants = select_inputs_buffer;
+
+	return phi_index;
+}
+
 static InstrIndex _compile_for_loop(FunctionCompiler* compiler,
 		InstrIndex current_region,
 		AstNode* node) {
@@ -2377,23 +2494,122 @@ static InstrIndex _compile_for_loop(FunctionCompiler* compiler,
 	Scope* body_scope = _loop_body_scope(node);
 	CompiledBlockRegions body_block = _compile_scope(compiler, body_scope);
 
-	// 8. Compile `advance_expr` right at the end of the body.
+	// 8.1. Merge values from the last iteration and from the blocks ending with `continue`
+
+	{
+		LoopSwitchState* current_loop = _get_current_loop_state(compiler);
+		ControlFlowStmt* control_stmts = current_loop->control_flow_stmts;
+
+		ControlFlowStmt from_body = {};
+		if (!instr_region_finished(instr_buffer, body_block.final_region)) {
+			from_body.next = control_stmts;
+			from_body.kind = CONTROL_FLOW_CONTINUE;
+			from_body.region = body_block.final_region;
+			from_body.var_values = compiler->var_values;
+			from_body.arg_values = compiler->arg_states;
+
+			control_stmts = &from_body;
+		}
+
+		for (size_t i = 0; i < compiler->var_count; i += 1) {
+			if (compiler->vars[i] == NULL) {
+				continue;
+			}
+
+			TypeKind var_type_kind = compiler->vars[i]->type.kind;
+			if (var_type_kind == TYPE_STRUCT
+					|| var_type_kind == TYPE_UNION
+					|| var_type_kind == TYPE_ARRAY) {
+				continue;
+			}
+
+			compiler->var_values[i] = _merge_values_from_last_iteration(compiler,
+					control_stmts,
+					i, true);
+		}
+
+		for (size_t i = 0; i < arg_count; i += 1) {
+			compiler->arg_states[i] = _merge_values_from_last_iteration(compiler,
+					control_stmts,
+					i, false);
+		}
+	}
+
+	// 8.2. Compile the advance expression.
+	
+	// Blocks that ends with a `continue`, first lead to the `advance_expr`.
+	InstrIndex advance_region = INVALID_INSTR_INDEX;
 	if (node->for_loop.advance_expr) {
 		if (!instr_region_finished(instr_buffer, body_block.final_region)) {
 			// If the loop body already ends with a control instruction, whether it's break,
 			// continue or a return, the `advance_expr` won't be rechable any more.
 			_compile_expr(compiler, node->for_loop.advance_expr);
+
+			advance_region = instr_new_region(instr_buffer, instr_allocator);
+			InstrIndex jump_to_advance = instr_new_jump(instr_buffer,
+					instr_allocator,
+					advance_region,
+					&compiler->io_state);
+			instr_region_set_last(instr_buffer, body_block.final_region, jump_to_advance);
 		}
 	}
 
 	// 9. Merge values from before the loop and from the last iteration
-	_merge_pre_loop_and_inner_values(compiler,
-			var_phis,
-			arg_phis,
-			original_var_values,
-			original_arg_values,
-			pre_loop_region_index,
-			body_block.final_region);
+
+	// Since we've merged values from blocks with `continue` before the `advance_expr`, here we only
+	// need to merge the onces ending with `break`.
+	{
+		LoopSwitchState* current_loop = _get_current_loop_state(compiler);
+		ControlFlowStmt* control_stmts = current_loop->control_flow_stmts;
+
+		ControlFlowStmt from_body = {};
+
+		if (advance_region.value != INVALID_INSTR_INDEX.value) {
+			from_body.next = control_stmts;
+			from_body.kind = CONTROL_FLOW_BREAK;
+			from_body.region = advance_region;
+			from_body.var_values = compiler->var_values;
+			from_body.arg_values = compiler->arg_states;
+
+			control_stmts = &from_body;
+		} else if (!instr_region_finished(instr_buffer, body_block.final_region)) {
+			from_body.next = control_stmts;
+			from_body.kind = CONTROL_FLOW_BREAK;
+			from_body.region = body_block.final_region;
+			from_body.var_values = compiler->var_values;
+			from_body.arg_values = compiler->arg_states;
+
+			control_stmts = &from_body;
+		}
+
+		ControlFlowStmt original = {};
+		original.next = control_stmts;
+		original.kind = CONTROL_FLOW_BREAK;
+		original.region = pre_loop_region_index;
+		original.var_values = original_var_values;
+		original.arg_values = original_arg_values;
+
+		control_stmts = &original;
+
+		for (size_t i = 0; i < compiler->var_count; i += 1) {
+			if (compiler->vars[i] == NULL) {
+				continue;
+			}
+
+			TypeKind var_type_kind = compiler->vars[i]->type.kind;
+			if (var_type_kind == TYPE_STRUCT
+					|| var_type_kind == TYPE_UNION
+					|| var_type_kind == TYPE_ARRAY) {
+				continue;
+			}
+
+			_merge_final_for_loop_phis(compiler, control_stmts, var_phis[i], i, true);
+		}
+
+		for (size_t i = 0; i < arg_count; i += 1) {
+			_merge_final_for_loop_phis(compiler, control_stmts, arg_phis[i], i, false);
+		}
+	}
 
 	// 10. Set post loop values to phis
 	array_copy(original_var_values, var_phis, compiler->var_count);
@@ -2403,7 +2619,9 @@ static InstrIndex _compile_for_loop(FunctionCompiler* compiler,
 	compiler->arg_states = original_arg_values;
 
 	// 11. Start the next iteration. Jump to the start of the loop.
-	if (!instr_region_finished(instr_buffer, body_block.final_region)) {
+	if (!instr_region_finished(instr_buffer, advance_region.value == INVALID_INSTR_INDEX.value
+					? body_block.final_region
+					: advance_region)) {
 		InstrIndex post_loop_jump_target = node->for_loop.condition
 			? condition_region
 			: body_block.initial_region;
@@ -2415,7 +2633,11 @@ static InstrIndex _compile_for_loop(FunctionCompiler* compiler,
 				post_loop_jump_target,
 				&compiler->io_state);
 
-		instr_region_set_last(instr_buffer, body_block.final_region, post_loop_jump);
+		instr_region_set_last(instr_buffer,
+				advance_region.value == INVALID_INSTR_INDEX.value
+					? body_block.final_region
+					: advance_region,
+				post_loop_jump);
 	}
 
 	// 12. Fix the jump targets, of the branch instruction
@@ -2438,7 +2660,7 @@ static InstrIndex _compile_for_loop(FunctionCompiler* compiler,
 	_fix_loop_control_jumps(instr_buffer,
 			compiler->loop_switch_state->control_flow_stmts,
 			post_loop_region_index, 
-			condition_region);
+			advance_region);
 	
 	_reset_variables_in_scope(compiler, node->for_loop.loop_scope);
 
