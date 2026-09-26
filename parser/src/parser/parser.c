@@ -4090,8 +4090,6 @@ static LoopBody _parser_parse_loop_body(Parser* parser, AstNode* node) {
 }
 
 static AstNode* _parser_parse_while_loop(Parser* parser) {
-	assert(parser->inside_a_loop);
-
 	Token while_token = preprocessor_next_token(parser->preprocessor);
 	assert(while_token.kind == TOKEN_KEYWORD_WHILE);
 
@@ -4136,8 +4134,6 @@ static AstNode* _parser_parse_while_loop(Parser* parser) {
 }
 
 static AstNode* _parser_parse_do_while_loop(Parser* parser) {
-	assert(parser->inside_a_loop);
-
 	Token do_token = preprocessor_next_token(parser->preprocessor);
 	assert(do_token.kind == TOKEN_KEYWORD_DO);;
 
@@ -4205,7 +4201,6 @@ static AstNode* _parser_parse_do_while_loop(Parser* parser) {
 
 static AstNode* _parser_parse_for_loop(Parser* parser) {
 	profile_func_colored(PROFILE_COLOR);
-	assert(parser->inside_a_loop);
 
 	Token for_token = preprocessor_next_token(parser->preprocessor);
 	assert(for_token.kind == TOKEN_KEYWORD_FOR);
@@ -4336,9 +4331,6 @@ static AstNode* _parser_parse_switch(Parser* parser) {
 
 	Token body_token = preprocessor_view_next(parser->preprocessor);
 	if (body_token.kind != TOKEN_SEMICOLON) {
-		bool previous_inside_a_switch = parser->inside_a_switch;
-		parser->inside_a_switch = true;
-
 		ParserLoopOrSwitchState current_loop = {
 			.node = node,
 			.parent = parser->loop_or_switch_state
@@ -4351,8 +4343,6 @@ static AstNode* _parser_parse_switch(Parser* parser) {
 		parser->loop_or_switch_state = parser->loop_or_switch_state->parent;
 
 		node->switch_stmt.body = &body->block;
-
-		parser->inside_a_switch = previous_inside_a_switch;
 	} else {
 		node->switch_stmt.body = arena_alloc_zeroed(parser->ast_allocator, Scope);
 	}
@@ -4516,27 +4506,12 @@ AstNode* _parser_parse_single_node(Parser* parser, Token initial_token) {
 	}
 	case TOKEN_KEYWORD_IF:
 		return _parser_parse_if_stmt(parser);
-	case TOKEN_KEYWORD_WHILE: {
-		bool inside_a_loop = parser->inside_a_loop;
-		parser->inside_a_loop = true;
-		AstNode* loop = _parser_parse_while_loop(parser);
-		parser->inside_a_loop = inside_a_loop;
-		return loop;
-	}
-	case TOKEN_KEYWORD_DO: {
-		bool inside_a_loop = parser->inside_a_loop;
-		parser->inside_a_loop = true;
-		AstNode* loop = _parser_parse_do_while_loop(parser);
-		parser->inside_a_loop = inside_a_loop;
-		return loop;
-	}
-	case TOKEN_KEYWORD_FOR: {
-		bool inside_a_loop = parser->inside_a_loop;
-		parser->inside_a_loop = true;
-		AstNode* loop = _parser_parse_for_loop(parser);
-		parser->inside_a_loop = inside_a_loop;
-		return loop;
-	}
+	case TOKEN_KEYWORD_WHILE:
+		return _parser_parse_while_loop(parser);
+	case TOKEN_KEYWORD_DO:
+		return _parser_parse_do_while_loop(parser);
+	case TOKEN_KEYWORD_FOR:
+		return _parser_parse_for_loop(parser);
 	case TOKEN_KEYWORD_BREAK: {
 		preprocessor_next_token(parser->preprocessor);
 
