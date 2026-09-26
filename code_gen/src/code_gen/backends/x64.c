@@ -2054,8 +2054,10 @@ static void _collect_phis(X64CodeGenerator* gen, Arena* allocator) {
 		}
 
 		InstrInputs variants = instr->phi.variants;
-		assert(variants.start <= instr_buffer->inputs_buffer_size);
-		assert(variants.start + variants.count <= instr_buffer->inputs_buffer_size);
+		if (variants.count > 0) {
+			assert(variants.start <= instr_buffer->inputs_buffer_size);
+			assert(variants.start + variants.count <= instr_buffer->inputs_buffer_size);
+		}
 
 		for (uint16_t j = 0; j < variants.count; j += 1) {
 			InstrIndex select = instr_buffer->inputs_buffer[variants.start + j];
