@@ -3759,51 +3759,86 @@ static void _compile_switch(FunctionCompiler* compiler,
 					true_region_index);
 		}
 
-		ControlFlowStmt initial_stmt = {
-			.kind = CONTROL_FLOW_BREAK,
-			.region = initial_region_index,
-			.var_values = initial_var_values,
-			.arg_values = initial_arg_values,
+		size_t var_count = compiler->var_count;
+		InstrIndex* current_var_values = arena_alloc_array(compiler->temp_allocator,
+				InstrIndex, 
+				var_count);
+		InstrIndex* current_arg_values = arena_alloc_array(compiler->temp_allocator,
+				InstrIndex,
+				arg_count);
+
+		array_copy(current_var_values, compiler->var_values, compiler->var_count);
+		array_copy(current_arg_values, compiler->arg_values, compiler->arg_count);
+
+		BitArray var_filter = _reserve_var_phis(compiler,
+				compiler->temp_allocator,
+				compiler->var_values);
+		BitArray arg_filter = _reserve_arg_phis(compiler,
+				compiler->temp_allocator,
+				compiler->arg_states);
+
+
+		size_t snapshot_count = 2;
+		LoopValuesSnapshot var_snapshots[3] = {};
+		var_snapshots[0] = (LoopValuesSnapshot) {
+			.entries = &initial_var_values,
+			.regions = &initial_region_index,
+			.count = 1,
+		};
+		var_snapshots[1] = (LoopValuesSnapshot) {
+			.entries = current_loop_switch_state.break_var_values,
+			.regions = current_loop_switch_state.break_regions,
+			.count = current_loop_switch_state.break_count,
 		};
 
-		ControlFlowStmt previous_case_stmt = {
-			.kind = CONTROL_FLOW_BREAK,
-			.region = true_region_index,
-			.var_values = compiler->var_values,
-			.arg_values = compiler->arg_states,
+		LoopValuesSnapshot arg_snapshots[3] = {};
+		arg_snapshots[0] = (LoopValuesSnapshot) {
+			.entries = &initial_arg_values,
+			.regions = &initial_region_index,
+			.count = 1,
+		};
+		arg_snapshots[1] = (LoopValuesSnapshot) {
+			.entries = current_loop_switch_state.break_arg_values,
+			.regions = current_loop_switch_state.break_regions,
+			.count = current_loop_switch_state.break_count,
 		};
 
-		ControlFlowStmt* break_stmts = compiler->loop_switch_state->control_flow_stmts;
+		if (fallthrough_from_previous_possible) {
+			// Also merge var/arg values from the previous case
+			snapshot_count = 3;
+			var_snapshots[2] = (LoopValuesSnapshot) {
+				.entries = &current_var_values,
+				.regions = &true_region_index,
+				.count = 1,
+			};
 
-		ControlFlowStmt* stmts = break_stmts;
-
-		if (fallthrough_possible) {
-			previous_case_stmt.next = stmts;
-			stmts = &previous_case_stmt;
+			arg_snapshots[2] = (LoopValuesSnapshot) {
+				.entries = &current_arg_values,
+				.regions = &true_region_index,
+				.count = 1,
+			};
 		}
 
-		initial_stmt.next = stmts;
-		stmts = &initial_stmt;
+		assert(array_size(var_snapshots) == array_size(arg_snapshots));
+		assert(snapshot_count <= array_size(var_snapshots));
 
-		_create_phis_for_switch_case(compiler,
-				instr_buffer,
-				instr_allocator,
-				initial_region_index,
-				true_region_index,
+		_reserve_phis(compiler, var_filter, compiler->var_values, compiler->var_values, var_count);
+		_reserve_phis(compiler, arg_filter, compiler->arg_states, compiler->arg_states, arg_count);
+
+		// Merge
+		_merge_variants(compiler,
 				compiler->var_values,
-				stmts,
-				true,
-				var_count);
-
-		_create_phis_for_switch_case(compiler,
-				instr_buffer,
-				instr_allocator,
-				initial_region_index,
-				true_region_index,
+				var_count,
+				var_snapshots,
+				snapshot_count,
+				var_filter);
+		_merge_variants(compiler,
 				compiler->arg_states,
-				stmts,
-				false,
-				arg_count);
+				arg_count,
+				arg_snapshots,
+				snapshot_count,
+				arg_filter);
+
 	}
 
 	maybe(true_region_index.value == false_region_index.value);
