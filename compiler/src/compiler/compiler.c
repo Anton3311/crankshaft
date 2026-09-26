@@ -1960,6 +1960,29 @@ struct LoopValuesSnapshot {
 	size_t count;
 };
 
+static void _reserve_phis(FunctionCompiler* compiler,
+		BitArray filter,
+		InstrIndex* original_values,
+		InstrIndex* out_phis,
+		size_t count) {
+	profile_scope_start(__func__);
+
+	assert(filter.bit_count == count);
+
+	InstrBuffer* instr_buffer = &compiler->instr_buffer;
+	Arena* instr_allocator = compiler->instr_allocator;
+
+	for (size_t i = 0; i < count; i += 1) {
+		if (bit_array_get(&filter, i)) {
+			out_phis[i] = instr_new_empty_phi(instr_buffer, instr_allocator);
+		} else {
+			out_phis[i] = original_values[i];
+		}
+	}
+
+	profile_scope_end();
+}
+
 static BitArray _reserve_var_phis(FunctionCompiler* compiler,
 		Arena* filter_allocator,
 		InstrIndex* out_phis) {
@@ -2612,26 +2635,8 @@ static InstrIndex _compile_for_loop(FunctionCompiler* compiler,
 			arg_count);
 
 	// 4. Replace current variables and arguments with phis
-	for (size_t i = 0; i < compiler->var_count; i += 1) {
-		if (compiler->vars[i] == NULL) {
-			var_phis[i] = INVALID_INSTR_INDEX;
-			continue;
-		}
-
-		TypeKind var_type_kind = compiler->vars[i]->type.kind;
-		if (var_type_kind == TYPE_STRUCT
-				|| var_type_kind == TYPE_UNION
-				|| var_type_kind == TYPE_ARRAY) {
-			var_phis[i] = original_var_values[i];
-			continue;
-		}
-
-		var_phis[i] = instr_new_empty_phi(instr_buffer, instr_allocator);
-	}
-
-	for (size_t i = 0; i < arg_count; i += 1) {
-		arg_phis[i] = instr_new_empty_phi(instr_buffer, instr_allocator);
-	}
+	BitArray var_filter = _reserve_var_phis(compiler, compiler->temp_allocator, var_phis);
+	BitArray arg_filter = _reserve_arg_phis(compiler, compiler->temp_allocator, arg_phis);
 
 	// 5. Set the created phis as current variable values
 	InstrIndex* var_values_for_body = arena_alloc_array(compiler->temp_allocator,
@@ -2691,42 +2696,72 @@ static InstrIndex _compile_for_loop(FunctionCompiler* compiler,
 	// 8.1. Merge values from the last iteration and from the blocks ending with `continue`
 
 	{
-		LoopSwitchState* current_loop = _get_current_loop_state(compiler);
-		ControlFlowStmt* control_stmts = current_loop->control_flow_stmts;
+		size_t var_count = compiler->var_count;
 
-		ControlFlowStmt from_body = {};
+		ArenaRegion temp = arena_begin_temp(compiler->temp_allocator);
+
+		InstrIndex* current_var_values = NULL;
+		InstrIndex* current_arg_values = NULL;
+
+		size_t snapshot_count = 1;
+		LoopValuesSnapshot var_snapshots[2] = {};
+		var_snapshots[0] = (LoopValuesSnapshot) {
+			.entries = current_loop_switch_state.continue_var_values,
+			.regions = current_loop_switch_state.continue_regions,
+			.count = current_loop_switch_state.continue_count,
+		};
+
+		LoopValuesSnapshot arg_snapshots[2] = {};
+		arg_snapshots[0] = (LoopValuesSnapshot) {
+			.entries = current_loop_switch_state.continue_arg_values,
+			.regions = current_loop_switch_state.continue_regions,
+			.count = current_loop_switch_state.continue_count,
+		};
+
 		if (!instr_region_finished(instr_buffer, body_block.final_region)) {
-			from_body.next = control_stmts;
-			from_body.kind = CONTROL_FLOW_CONTINUE;
-			from_body.region = body_block.final_region;
-			from_body.var_values = compiler->var_values;
-			from_body.arg_values = compiler->arg_states;
+			snapshot_count = 2;
 
-			control_stmts = &from_body;
+			current_var_values = arena_alloc_array(compiler->temp_allocator,
+					InstrIndex,
+					var_count);
+			current_arg_values = arena_alloc_array(compiler->temp_allocator,
+					InstrIndex,
+					arg_count);
+
+			array_copy(current_var_values, compiler->var_values, var_count);
+			array_copy(current_arg_values, compiler->arg_states, arg_count);
+
+			var_snapshots[1] = (LoopValuesSnapshot) {
+				.entries = &current_var_values,
+				.regions = &body_block.final_region,
+				.count = 1,
+			};
+
+			arg_snapshots[1] = (LoopValuesSnapshot) {
+				.entries = &current_arg_values,
+				.regions = &body_block.final_region,
+				.count = 1,
+			};
 		}
 
-		for (size_t i = 0; i < compiler->var_count; i += 1) {
-			if (compiler->vars[i] == NULL) {
-				continue;
-			}
+		_reserve_phis(compiler, var_filter, compiler->var_values, compiler->var_values, var_count);
+		_reserve_phis(compiler, arg_filter, compiler->arg_states, compiler->arg_states, arg_count);
 
-			TypeKind var_type_kind = compiler->vars[i]->type.kind;
-			if (var_type_kind == TYPE_STRUCT
-					|| var_type_kind == TYPE_UNION
-					|| var_type_kind == TYPE_ARRAY) {
-				continue;
-			}
+		// Merge
+		_merge_variants(compiler,
+				compiler->var_values,
+				var_count,
+				var_snapshots,
+				snapshot_count,
+				var_filter);
+		_merge_variants(compiler,
+				compiler->arg_states,
+				arg_count,
+				arg_snapshots,
+				snapshot_count,
+				arg_filter);
 
-			compiler->var_values[i] = _merge_values_from_last_iteration(compiler,
-					control_stmts,
-					i, true);
-		}
-
-		for (size_t i = 0; i < arg_count; i += 1) {
-			compiler->arg_states[i] = _merge_values_from_last_iteration(compiler,
-					control_stmts,
-					i, false);
-		}
+		arena_end_temp(temp);
 	}
 
 	// 8.2. Compile the advance expression.
