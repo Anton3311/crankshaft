@@ -29,26 +29,7 @@ inline StringArray str_storage_to_array(StringStorage* storage) {
 // FunctionCompiler
 //
 
-typedef struct ControlFlowStmt ControlFlowStmt;
 typedef struct LoopSwitchState LoopSwitchState;
-
-typedef enum {
-	CONTROL_FLOW_BREAK,
-	CONTROL_FLOW_CONTINUE,
-} ControlFlowKind;
-
-struct ControlFlowStmt {
-	ControlFlowKind kind;
-
-	// A region where this `break` or `continue` statement appears
-	InstrIndex region;
-	
-	// Var and arg values at the time of reaching the `break` or `continue` statement.
-	InstrIndex* var_values;
-	InstrIndex* arg_values;
-
-	ControlFlowStmt* next;
-};
 
 // This is ment to keep track of the nearest loop or switch statement to the current compiler
 // location in the ast. Together with the nearest loop or switch, this struct also keeps track of
@@ -64,9 +45,6 @@ struct ControlFlowStmt {
 struct LoopSwitchState {
 	// The parent loop/switch
 	LoopSwitchState* parent;
-
-	// Control flow statement for the this loop or switch.
-	ControlFlowStmt* control_flow_stmts;
 
 	AstNode* node;
 
@@ -127,7 +105,6 @@ typedef struct {
 	SymbolMap* symbol_map;
 
 	LoopSwitchState* loop_switch_state;
-	ControlFlowStmt* free_control_flow_stmt;
 
 	// An array internal to the compiler, which is used to defer filling of the
 	// `function_call_signatures`. The array is allocated using the `temp_allocator`.

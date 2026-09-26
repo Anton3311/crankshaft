@@ -45,46 +45,6 @@ void str_storage_release(StringStorage* storage) {
 // FunctionCompiler
 //
 
-static ControlFlowStmt* _alloc_control_flow_stmt(FunctionCompiler* compiler) {
-	if (compiler->free_control_flow_stmt) {
-		ControlFlowStmt* stmt = compiler->free_control_flow_stmt;
-		compiler->free_control_flow_stmt = stmt->next;
-		stmt->next = NULL;
-		return stmt;
-	}
-
-	ControlFlowStmt* stmt = heap_alloc(ControlFlowStmt);
-	stmt->next = NULL;
-
-	size_t arg_count = compiler->function->proto.parameter_count;
-
-	stmt->var_values = heap_alloc_array(InstrIndex, compiler->var_count);
-	stmt->arg_values = heap_alloc_array(InstrIndex, arg_count);
-	return stmt;
-}
-
-static void _free_control_flow_stmt(FunctionCompiler* compiler, ControlFlowStmt* stmt) {
-	assert(stmt != NULL);
-
-	ControlFlowStmt* last = stmt;
-	for (; last->next != NULL; last = last->next) {}
-
-	last->next = compiler->free_control_flow_stmt;
-	compiler->free_control_flow_stmt = stmt;
-}
-
-static void _free_all_control_flow_stmts(FunctionCompiler* compiler) {
-	ControlFlowStmt* stmt = compiler->free_control_flow_stmt;
-	while (stmt) {
-		ControlFlowStmt* next = stmt->next;
-
-		heap_release(stmt->var_values);
-		heap_release(stmt->arg_values);
-		heap_release(stmt);
-		stmt = next;
-	}
-}
-
 static LoopSwitchState* _get_current_loop_state(FunctionCompiler* compiler) {
 	LoopSwitchState* state = compiler->loop_switch_state;
 
@@ -132,7 +92,6 @@ static void _enter_loop_switch_state(FunctionCompiler* compiler,
 	}
 
 	state->parent = compiler->loop_switch_state;
-	state->control_flow_stmts = NULL;
 	state->node = node;
 
 	state->break_count = 0;
@@ -185,10 +144,6 @@ static void _enter_loop_switch_state(FunctionCompiler* compiler,
 
 static void _restore_loop_switch_state(FunctionCompiler* compiler) {
 	assert(compiler->loop_switch_state);
-	if (compiler->loop_switch_state->control_flow_stmts) {
-		_free_control_flow_stmt(compiler, compiler->loop_switch_state->control_flow_stmts);
-	}
-
 	compiler->loop_switch_state = compiler->loop_switch_state->parent;
 }
 
@@ -4101,9 +4056,6 @@ CompiledFunction function_compiler_compile(FunctionCompiler* compiler) {
 	CompiledBlockRegions body_block = _compile_scope(compiler, compiler->function->body);
 
 	assert(compiler->loop_switch_state == NULL);
-
-	// Free the loop control staff, since it is no longer needed
-	_free_all_control_flow_stmts(compiler);
 
 	if (compiler->function->proto.return_type.kind == TYPE_VOID) {
 		InstrIndex final_region = body_block.final_region;
