@@ -2788,56 +2788,74 @@ static InstrIndex _compile_for_loop(FunctionCompiler* compiler,
 	// Since we've merged values from blocks with `continue` before the `advance_expr`, here we only
 	// need to merge the onces ending with `break`.
 	{
-		LoopSwitchState* current_loop = _get_current_loop_state(compiler);
-		ControlFlowStmt* control_stmts = current_loop->control_flow_stmts;
+		size_t snapshot_count = 3;
+		LoopValuesSnapshot var_snapshots[3] = {};
+		var_snapshots[0] = (LoopValuesSnapshot) {
+			.entries = &original_var_values,
+			.regions = &pre_loop_region_index,
+			.count = 1,
+		};
+		var_snapshots[1] = (LoopValuesSnapshot) {
+			.entries = current_loop_switch_state.break_var_values,
+			.regions = current_loop_switch_state.break_regions,
+			.count = current_loop_switch_state.break_count,
+		};
 
-		ControlFlowStmt from_body = {};
+		LoopValuesSnapshot arg_snapshots[3] = {};
+		arg_snapshots[0] = (LoopValuesSnapshot) {
+			.entries = &original_arg_values,
+			.regions = &pre_loop_region_index,
+			.count = 1,
+		};
+		arg_snapshots[1] = (LoopValuesSnapshot) {
+			.entries = current_loop_switch_state.break_arg_values,
+			.regions = current_loop_switch_state.break_regions,
+			.count = current_loop_switch_state.break_count,
+		};
 
 		if (advance_region.value != INVALID_INSTR_INDEX.value) {
-			from_body.next = control_stmts;
-			from_body.kind = CONTROL_FLOW_BREAK;
-			from_body.region = advance_region;
-			from_body.var_values = compiler->var_values;
-			from_body.arg_values = compiler->arg_states;
+			snapshot_count = 3;
+			var_snapshots[2] = (LoopValuesSnapshot) {
+				.entries = &compiler->var_values,
+				.regions = &advance_region,
+				.count = 1,
+			};
 
-			control_stmts = &from_body;
+			arg_snapshots[2] = (LoopValuesSnapshot) {
+				.entries = &compiler->arg_states,
+				.regions = &advance_region,
+				.count = 1,
+			};
 		} else if (!instr_region_finished(instr_buffer, body_block.final_region)) {
-			from_body.next = control_stmts;
-			from_body.kind = CONTROL_FLOW_BREAK;
-			from_body.region = body_block.final_region;
-			from_body.var_values = compiler->var_values;
-			from_body.arg_values = compiler->arg_states;
+			snapshot_count = 3;
+			var_snapshots[2] = (LoopValuesSnapshot) {
+				.entries = &compiler->var_values,
+				.regions = &body_block.final_region,
+				.count = 1,
+			};
 
-			control_stmts = &from_body;
+			arg_snapshots[2] = (LoopValuesSnapshot) {
+				.entries = &compiler->arg_states,
+				.regions = &body_block.final_region,
+				.count = 1,
+			};
 		}
 
-		ControlFlowStmt original = {};
-		original.next = control_stmts;
-		original.kind = CONTROL_FLOW_BREAK;
-		original.region = pre_loop_region_index;
-		original.var_values = original_var_values;
-		original.arg_values = original_arg_values;
+		assert(array_size(var_snapshots) == array_size(arg_snapshots));
+		assert(snapshot_count <= array_size(var_snapshots));
 
-		control_stmts = &original;
-
-		for (size_t i = 0; i < compiler->var_count; i += 1) {
-			if (compiler->vars[i] == NULL) {
-				continue;
-			}
-
-			TypeKind var_type_kind = compiler->vars[i]->type.kind;
-			if (var_type_kind == TYPE_STRUCT
-					|| var_type_kind == TYPE_UNION
-					|| var_type_kind == TYPE_ARRAY) {
-				continue;
-			}
-
-			_merge_final_for_loop_phis(compiler, control_stmts, var_phis[i], i, true);
-		}
-
-		for (size_t i = 0; i < arg_count; i += 1) {
-			_merge_final_for_loop_phis(compiler, control_stmts, arg_phis[i], i, false);
-		}
+		_merge_variants(compiler,
+				var_phis,
+				compiler->var_count,
+				var_snapshots,
+				snapshot_count,
+				var_filter);
+		_merge_variants(compiler,
+				arg_phis,
+				arg_count,
+				arg_snapshots,
+				snapshot_count,
+				arg_filter);
 	}
 
 	// 10. Set post loop values to phis
