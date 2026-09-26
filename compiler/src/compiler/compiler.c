@@ -45,108 +45,6 @@ void str_storage_release(StringStorage* storage) {
 // FunctionCompiler
 //
 
-static LoopSwitchState* _get_current_loop_state(FunctionCompiler* compiler) {
-	LoopSwitchState* state = compiler->loop_switch_state;
-
-	while (state) {
-		assert(state->node);
-		switch (state->node->kind) {
-		case AST_NODE_WHILE_LOOP:
-		case AST_NODE_FOR_LOOP:
-			return state;
-		case AST_NODE_SWITCH:
-			panic("Nearest loop is actually a switch statement. This is not allowed");
-		default:
-			panic("`node` in `LoopSwitchState` can only be either a loop (for, while) or a switch");
-		}
-
-		state = state->parent;
-	}
-
-	return NULL;
-}
-
-static void _enter_loop_switch_state(FunctionCompiler* compiler,
-		AstNode* node,
-		LoopSwitchState* state,
-		Arena* allocator) {
-	profile_scope_start(__func__);
-
-	size_t break_count = 0;
-	size_t continue_count = 0;
-
-	switch (node->kind) {
-	case AST_NODE_FOR_LOOP:
-		break_count = node->for_loop.break_count;
-		continue_count = node->for_loop.continue_count;
-		break;
-	case AST_NODE_WHILE_LOOP:
-		break_count = node->while_loop.break_count;
-		continue_count = node->while_loop.continue_count;
-		break;
-	case AST_NODE_SWITCH:
-		break_count = node->switch_stmt.break_count;
-		break;
-	default:
-		panic("Neither a loop nor a switch");
-	}
-
-	state->parent = compiler->loop_switch_state;
-	state->node = node;
-
-	state->break_count = 0;
-	state->break_capacity = break_count;
-
-	size_t var_count = compiler->var_count;
-	size_t arg_count = compiler->function->proto.parameter_count;
-
-	if (break_count > 0) {
-		state->break_var_values = arena_alloc_array(allocator, InstrIndex*, break_count);
-		state->break_arg_values = arena_alloc_array(allocator, InstrIndex*, break_count);
-		state->break_regions = arena_alloc_array(allocator, InstrIndex, break_count);
-
-		for (size_t i = 0; i < break_count; i += 1) {
-			state->break_var_values[i] = arena_alloc_array(allocator, InstrIndex, var_count);
-		}
-
-		for (size_t i = 0; i < break_count; i += 1) {
-			state->break_arg_values[i] = arena_alloc_array(allocator, InstrIndex, arg_count);
-		}
-	} else {
-		state->break_var_values = NULL;
-		state->break_arg_values = NULL;
-		state->break_regions = NULL;
-	}
-
-	state->continue_count = 0;
-	state->continue_capacity = continue_count;
-	if (continue_count > 0) {
-		state->continue_var_values = arena_alloc_array(allocator, InstrIndex*, continue_count);
-		state->continue_arg_values = arena_alloc_array(allocator, InstrIndex*, continue_count);
-		state->continue_regions = arena_alloc_array(allocator, InstrIndex, continue_count);
-
-		for (size_t i = 0; i < continue_count; i += 1) {
-			state->continue_var_values[i] = arena_alloc_array(allocator, InstrIndex, var_count);
-		}
-
-		for (size_t i = 0; i < continue_count; i += 1) {
-			state->continue_arg_values[i] = arena_alloc_array(allocator, InstrIndex, arg_count);
-		}
-	} else {
-		state->continue_var_values = NULL;
-		state->continue_arg_values = NULL;
-		state->continue_regions = NULL;
-	}
-
-	compiler->loop_switch_state = state;
-	profile_scope_end();
-}
-
-static void _restore_loop_switch_state(FunctionCompiler* compiler) {
-	assert(compiler->loop_switch_state);
-	compiler->loop_switch_state = compiler->loop_switch_state->parent;
-}
-
 typedef struct {
 	InstrIndex initial_region;
 	InstrIndex final_region;
@@ -1838,6 +1736,108 @@ static InstrIndex _create_phi_of_2_variants(FunctionCompiler* compiler,
 //
 // Loop Compilation
 //
+
+static LoopSwitchState* _get_current_loop_state(FunctionCompiler* compiler) {
+	LoopSwitchState* state = compiler->loop_switch_state;
+
+	while (state) {
+		assert(state->node);
+		switch (state->node->kind) {
+		case AST_NODE_WHILE_LOOP:
+		case AST_NODE_FOR_LOOP:
+			return state;
+		case AST_NODE_SWITCH:
+			panic("Nearest loop is actually a switch statement. This is not allowed");
+		default:
+			panic("`node` in `LoopSwitchState` can only be either a loop (for, while) or a switch");
+		}
+
+		state = state->parent;
+	}
+
+	return NULL;
+}
+
+static void _enter_loop_switch_state(FunctionCompiler* compiler,
+		AstNode* node,
+		LoopSwitchState* state,
+		Arena* allocator) {
+	profile_scope_start(__func__);
+
+	size_t break_count = 0;
+	size_t continue_count = 0;
+
+	switch (node->kind) {
+	case AST_NODE_FOR_LOOP:
+		break_count = node->for_loop.break_count;
+		continue_count = node->for_loop.continue_count;
+		break;
+	case AST_NODE_WHILE_LOOP:
+		break_count = node->while_loop.break_count;
+		continue_count = node->while_loop.continue_count;
+		break;
+	case AST_NODE_SWITCH:
+		break_count = node->switch_stmt.break_count;
+		break;
+	default:
+		panic("Neither a loop nor a switch");
+	}
+
+	state->parent = compiler->loop_switch_state;
+	state->node = node;
+
+	state->break_count = 0;
+	state->break_capacity = break_count;
+
+	size_t var_count = compiler->var_count;
+	size_t arg_count = compiler->function->proto.parameter_count;
+
+	if (break_count > 0) {
+		state->break_var_values = arena_alloc_array(allocator, InstrIndex*, break_count);
+		state->break_arg_values = arena_alloc_array(allocator, InstrIndex*, break_count);
+		state->break_regions = arena_alloc_array(allocator, InstrIndex, break_count);
+
+		for (size_t i = 0; i < break_count; i += 1) {
+			state->break_var_values[i] = arena_alloc_array(allocator, InstrIndex, var_count);
+		}
+
+		for (size_t i = 0; i < break_count; i += 1) {
+			state->break_arg_values[i] = arena_alloc_array(allocator, InstrIndex, arg_count);
+		}
+	} else {
+		state->break_var_values = NULL;
+		state->break_arg_values = NULL;
+		state->break_regions = NULL;
+	}
+
+	state->continue_count = 0;
+	state->continue_capacity = continue_count;
+	if (continue_count > 0) {
+		state->continue_var_values = arena_alloc_array(allocator, InstrIndex*, continue_count);
+		state->continue_arg_values = arena_alloc_array(allocator, InstrIndex*, continue_count);
+		state->continue_regions = arena_alloc_array(allocator, InstrIndex, continue_count);
+
+		for (size_t i = 0; i < continue_count; i += 1) {
+			state->continue_var_values[i] = arena_alloc_array(allocator, InstrIndex, var_count);
+		}
+
+		for (size_t i = 0; i < continue_count; i += 1) {
+			state->continue_arg_values[i] = arena_alloc_array(allocator, InstrIndex, arg_count);
+		}
+	} else {
+		state->continue_var_values = NULL;
+		state->continue_arg_values = NULL;
+		state->continue_regions = NULL;
+	}
+
+	compiler->loop_switch_state = state;
+	profile_scope_end();
+}
+
+static void _restore_loop_switch_state(FunctionCompiler* compiler) {
+	assert(compiler->loop_switch_state);
+	compiler->loop_switch_state = compiler->loop_switch_state->parent;
+}
 
 static Scope* _loop_body_scope(AstNode* loop) {
 	if (loop->kind == AST_NODE_FOR_LOOP) {
