@@ -2744,6 +2744,9 @@ static InstrIndex _compile_for_loop(FunctionCompiler* compiler,
 			};
 		}
 
+		assert(array_size(var_snapshots) == array_size(arg_snapshots));
+		assert(snapshot_count <= array_size(var_snapshots));
+
 		_reserve_phis(compiler, var_filter, compiler->var_values, compiler->var_values, var_count);
 		_reserve_phis(compiler, arg_filter, compiler->arg_states, compiler->arg_states, arg_count);
 
@@ -2997,26 +3000,9 @@ static InstrIndex _compile_do_while_loop(FunctionCompiler* compiler,
 			InstrIndex,
 			arg_count);
 
-	for (size_t i = 0; i < compiler->var_count; i += 1) {
-		if (compiler->vars[i] == NULL) {
-			var_phis[i] = INVALID_INSTR_INDEX;
-			continue;
-		}
-
-		TypeKind var_type_kind = compiler->vars[i]->type.kind;
-		if (var_type_kind == TYPE_STRUCT
-				|| var_type_kind == TYPE_UNION
-				|| var_type_kind == TYPE_ARRAY) {
-			var_phis[i] = original_var_values[i];
-			continue;
-		}
-
-		var_phis[i] = instr_new_empty_phi(instr_buffer, instr_allocator);
-	}
-
-	for (size_t i = 0; i < arg_count; i += 1) {
-		arg_phis[i] = instr_new_empty_phi(instr_buffer, instr_allocator);
-	}
+	// Replace current variables and arguments with phis
+	BitArray var_filter = _reserve_var_phis(compiler, compiler->temp_allocator, var_phis);
+	BitArray arg_filter = _reserve_arg_phis(compiler, compiler->temp_allocator, arg_phis);
 
 	// 4. Create copies of variable value arrays
 	InstrIndex* var_values_for_body = arena_alloc_array(compiler->temp_allocator,
@@ -3074,15 +3060,78 @@ static InstrIndex _compile_do_while_loop(FunctionCompiler* compiler,
 
 	compiler->io_state = instr_new_io_state(instr_buffer, instr_allocator, INVALID_INSTR_INDEX);
 
-	// 7. Now fill the empty variant with the value produced inside the loop body.
+	// 7. Now merge values from before the loop, last iteration and blocks with either a `break` or
+	//    a `continue`
 
-	_merge_pre_loop_and_inner_values(compiler,
-			var_phis,
-			arg_phis,
-			original_var_values,
-			original_arg_values,
-			pre_loop_region,
-			final_region_finished ? INVALID_INSTR_INDEX : condition_region);
+	{
+		size_t snapshot_count = 3;
+		LoopValuesSnapshot var_snapshots[4] = {};
+		var_snapshots[0] = (LoopValuesSnapshot) {
+			.entries = &original_var_values,
+			.regions = &pre_loop_region,
+			.count = 1,
+		};
+		var_snapshots[1] = (LoopValuesSnapshot) {
+			.entries = current_loop_switch_state.break_var_values,
+			.regions = current_loop_switch_state.break_regions,
+			.count = current_loop_switch_state.break_count,
+		};
+		var_snapshots[2] = (LoopValuesSnapshot) {
+			.entries = current_loop_switch_state.continue_var_values,
+			.regions = current_loop_switch_state.continue_regions,
+			.count = current_loop_switch_state.continue_count,
+		};
+
+		LoopValuesSnapshot arg_snapshots[4] = {};
+		arg_snapshots[0] = (LoopValuesSnapshot) {
+			.entries = &original_arg_values,
+			.regions = &pre_loop_region,
+			.count = 1,
+		};
+		arg_snapshots[1] = (LoopValuesSnapshot) {
+			.entries = current_loop_switch_state.break_arg_values,
+			.regions = current_loop_switch_state.break_regions,
+			.count = current_loop_switch_state.break_count,
+		};
+		arg_snapshots[2] = (LoopValuesSnapshot) {
+			.entries = current_loop_switch_state.continue_arg_values,
+			.regions = current_loop_switch_state.continue_regions,
+			.count = current_loop_switch_state.continue_count,
+		};
+
+		if (!final_region_finished) {
+			snapshot_count = 4;
+
+			var_snapshots[3] = (LoopValuesSnapshot) {
+				.entries = &compiler->var_values,
+				.regions = &condition_region,
+				.count = 1,
+			};
+
+			arg_snapshots[3] = (LoopValuesSnapshot) {
+				.entries = &compiler->arg_states,
+				.regions = &condition_region,
+				.count = 1,
+			};
+		}
+
+		assert(array_size(var_snapshots) == array_size(arg_snapshots));
+		assert(snapshot_count <= array_size(var_snapshots));
+
+		_merge_variants(compiler,
+				var_phis,
+				compiler->var_count,
+				var_snapshots,
+				snapshot_count,
+				var_filter);
+
+		_merge_variants(compiler,
+				arg_phis,
+				arg_count,
+				arg_snapshots,
+				snapshot_count,
+				arg_filter);
+	}
 
 	array_copy(original_var_values, var_phis, compiler->var_count);
 	array_copy(original_arg_values, arg_phis, arg_count);
