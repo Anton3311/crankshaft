@@ -3714,7 +3714,7 @@ static void _compile_single_node(FunctionCompiler* compiler,
 		} else if (node->kind == AST_NODE_CONTINUE) {
 			state = _get_current_loop_state(compiler);
 			assert_msg(state,
-					"`break` statement appears outside of a loop");
+					"`continue` statement appears outside of a loop");
 		}
 
 		assert(state);
