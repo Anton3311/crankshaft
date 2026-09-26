@@ -2035,13 +2035,45 @@ static BitArray _reserve_arg_phis(FunctionCompiler* compiler,
 	return filter;
 }
 
-// The number of snapshots is usually very low.
+static InstrIndex _deduplicate_snapshot_values(const LoopValuesSnapshot* snapshots,
+		size_t snapshot_count,
+		size_t value_index) {
+	profile_scope_start(__func__);
+
+	InstrIndex deduplicated = INVALID_INSTR_INDEX;
+	for (size_t snapshot_index = 0; snapshot_index < snapshot_count; snapshot_index += 1) {
+		LoopValuesSnapshot snapshot = snapshots[snapshot_index];
+		for (size_t entry_index = 0; entry_index < snapshot.count; entry_index += 1) {
+			InstrIndex variant_index = snapshot.entries[entry_index][value_index];
+			if (deduplicated.value == INVALID_INSTR_INDEX.value) {
+				assert(variant_index.value != INVALID_INSTR_INDEX.value);
+				deduplicated = variant_index;
+			} else if (variant_index.value != deduplicated.value) {
+				profile_scope_end();
+				return INVALID_INSTR_INDEX;
+			}
+		}
+	}
+
+	profile_scope_end();
+	return deduplicated;
+}
+
+// Merges values from all snapshots into a single phi:
+// * `phi` is already expected to be prefilled with empty phis (for example, using `_reserve_phis`).
+// * `filter` tells which `phis` entries to ignore. If `bit_array_get(&filter, phi_index) == false`,
+//   then it is skipped.
+// * `deduplicate_all` - in case *all of the variants are the same*, then replace the phi with
+//   that variant instead by directly modifing `phis.
+// 
+// NOTE: The number of snapshots is usually very low.
 static void _merge_variants(FunctionCompiler* compiler,
 		InstrIndex* phis,
 		size_t phi_count,
 		const LoopValuesSnapshot* snapshots,
 		size_t snapshot_count,
-		BitArray filter) {
+		BitArray filter,
+		bool deduplicate_all) {
 	profile_scope_start(__func__);
 	assert(phi_count == filter.bit_count);
 
@@ -2061,7 +2093,18 @@ static void _merge_variants(FunctionCompiler* compiler,
 		Instr* phi = instr_buffer_at(instr_buffer, phis[phi_index]);
 		assert(phi->kind == INSTR_PHI);
 		assert(phi->phi.variants.start == UINT16_MAX);
-		assert(phi->phi.variants.count == UINT16_MAX);
+		assert(phi->phi.variants.count == 0);
+
+		if (deduplicate_all) {
+			InstrIndex deduplicated = _deduplicate_snapshot_values(snapshots,
+					snapshot_count,
+					phi_index);
+
+			if (deduplicated.value != INVALID_INSTR_INDEX.value) {
+				phis[phi_index] = deduplicated;
+				continue;
+			}
+		}
 
 		InstrInputs select_inputs_buffer = instr_allocate_inputs_array(instr_buffer, variant_count);
 		InstrIndex* select_inputs = &instr_buffer->inputs_buffer[select_inputs_buffer.start];
@@ -2348,7 +2391,9 @@ static InstrIndex _compile_loop(FunctionCompiler* compiler,
 				var_phis,
 				compiler->var_count,
 				var_snapshots,
-				array_size(var_snapshots), var_filter);
+				array_size(var_snapshots),
+				var_filter,
+				false);
 
 		LoopValuesSnapshot arg_snapshots[] = {
 			(LoopValuesSnapshot) {
@@ -2377,7 +2422,9 @@ static InstrIndex _compile_loop(FunctionCompiler* compiler,
 				arg_phis,
 				arg_count,
 				arg_snapshots,
-				array_size(arg_snapshots), arg_filter);
+				array_size(arg_snapshots),
+				arg_filter,
+				false);
 	}
 
 
@@ -2756,13 +2803,15 @@ static InstrIndex _compile_for_loop(FunctionCompiler* compiler,
 				var_count,
 				var_snapshots,
 				snapshot_count,
-				var_filter);
+				var_filter,
+				false);
 		_merge_variants(compiler,
 				compiler->arg_states,
 				arg_count,
 				arg_snapshots,
 				snapshot_count,
-				arg_filter);
+				arg_filter,
+				false);
 
 		arena_end_temp(temp);
 	}
@@ -2852,13 +2901,15 @@ static InstrIndex _compile_for_loop(FunctionCompiler* compiler,
 				compiler->var_count,
 				var_snapshots,
 				snapshot_count,
-				var_filter);
+				var_filter,
+				false);
 		_merge_variants(compiler,
 				arg_phis,
 				arg_count,
 				arg_snapshots,
 				snapshot_count,
-				arg_filter);
+				arg_filter,
+				false);
 	}
 
 	// 10. Set post loop values to phis
@@ -3123,14 +3174,16 @@ static InstrIndex _compile_do_while_loop(FunctionCompiler* compiler,
 				compiler->var_count,
 				var_snapshots,
 				snapshot_count,
-				var_filter);
+				var_filter,
+				false);
 
 		_merge_variants(compiler,
 				arg_phis,
 				arg_count,
 				arg_snapshots,
 				snapshot_count,
-				arg_filter);
+				arg_filter,
+				false);
 	}
 
 	array_copy(original_var_values, var_phis, compiler->var_count);
@@ -3768,7 +3821,7 @@ static void _compile_switch(FunctionCompiler* compiler,
 				arg_count);
 
 		array_copy(current_var_values, compiler->var_values, compiler->var_count);
-		array_copy(current_arg_values, compiler->arg_values, compiler->arg_count);
+		array_copy(current_arg_values, compiler->arg_states, arg_count);
 
 		BitArray var_filter = _reserve_var_phis(compiler,
 				compiler->temp_allocator,
@@ -3803,7 +3856,7 @@ static void _compile_switch(FunctionCompiler* compiler,
 			.count = current_loop_switch_state.break_count,
 		};
 
-		if (fallthrough_from_previous_possible) {
+		if (fallthrough_possible) {
 			// Also merge var/arg values from the previous case
 			snapshot_count = 3;
 			var_snapshots[2] = (LoopValuesSnapshot) {
@@ -3831,14 +3884,15 @@ static void _compile_switch(FunctionCompiler* compiler,
 				var_count,
 				var_snapshots,
 				snapshot_count,
-				var_filter);
+				var_filter,
+				true);
 		_merge_variants(compiler,
 				compiler->arg_states,
 				arg_count,
 				arg_snapshots,
 				snapshot_count,
-				arg_filter);
-
+				arg_filter,
+				true);
 	}
 
 	maybe(true_region_index.value == false_region_index.value);

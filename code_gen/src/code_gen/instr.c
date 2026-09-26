@@ -286,6 +286,7 @@ InstrIndex instr_new_empty_phi(InstrBuffer* buffer, Arena* allocator) {
 	InstrIndex i = instr_buffer_append(buffer, allocator);
 	Instr* instr = instr_buffer_at(buffer, i);
 	instr->kind = INSTR_PHI;
+	instr->phi.variants.count = 0;
 	return i;
 }
 
