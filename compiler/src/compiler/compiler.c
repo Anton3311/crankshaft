@@ -145,6 +145,14 @@ static void _enter_loop_switch_state(FunctionCompiler* compiler,
 		state->break_var_values = arena_alloc_array(allocator, InstrIndex*, break_count);
 		state->break_arg_values = arena_alloc_array(allocator, InstrIndex*, break_count);
 		state->break_regions = arena_alloc_array(allocator, InstrIndex, break_count);
+
+		for (size_t i = 0; i < break_count; i += 1) {
+			state->break_var_values[i] = arena_alloc_array(allocator, InstrIndex, var_count);
+		}
+
+		for (size_t i = 0; i < break_count; i += 1) {
+			state->break_arg_values[i] = arena_alloc_array(allocator, InstrIndex, arg_count);
+		}
 	} else {
 		state->break_var_values = NULL;
 		state->break_arg_values = NULL;
@@ -157,6 +165,14 @@ static void _enter_loop_switch_state(FunctionCompiler* compiler,
 		state->continue_var_values = arena_alloc_array(allocator, InstrIndex*, continue_count);
 		state->continue_arg_values = arena_alloc_array(allocator, InstrIndex*, continue_count);
 		state->continue_regions = arena_alloc_array(allocator, InstrIndex, continue_count);
+
+		for (size_t i = 0; i < continue_count; i += 1) {
+			state->continue_var_values[i] = arena_alloc_array(allocator, InstrIndex, var_count);
+		}
+
+		for (size_t i = 0; i < continue_count; i += 1) {
+			state->continue_arg_values[i] = arena_alloc_array(allocator, InstrIndex, arg_count);
+		}
 	} else {
 		state->continue_var_values = NULL;
 		state->continue_arg_values = NULL;
@@ -3711,35 +3727,33 @@ static void _compile_single_node(FunctionCompiler* compiler,
 
 		region_instr->region.last_instr = jump;
 
-		ControlFlowStmt* control = _alloc_control_flow_stmt(compiler);
-		control->kind = node->kind == AST_NODE_BREAK
-			? CONTROL_FLOW_BREAK
-			: CONTROL_FLOW_CONTINUE;
-		control->region = *region_instr_index;
-
 		size_t arg_count = compiler->function->proto.parameter_count;
-
-		array_copy(control->var_values, compiler->var_values, compiler->var_count);
-		array_copy(control->arg_values, compiler->arg_states, arg_count);
-
 		if (node->kind == AST_NODE_BREAK) {
 			assert(state->break_count < state->break_capacity);
 
-			state->break_var_values[state->break_count] = control->var_values;
-			state->break_arg_values[state->break_count] = control->arg_values;
+			array_copy(state->break_var_values[state->break_count],
+					compiler->var_values,
+					compiler->var_count);
+			array_copy(state->break_arg_values[state->break_count],
+					compiler->arg_states,
+					arg_count);
+
 			state->break_regions[state->break_count] = *region_instr_index;
 			state->break_count += 1;
 		} else if (node->kind == AST_NODE_CONTINUE) {
 			assert(state->continue_count < state->continue_capacity);
 
-			state->continue_var_values[state->continue_count] = control->var_values;
-			state->continue_arg_values[state->continue_count] = control->arg_values;
+			array_copy(state->continue_var_values[state->continue_count],
+					compiler->var_values,
+					compiler->var_count);
+			array_copy(state->continue_arg_values[state->continue_count],
+					compiler->arg_states,
+					arg_count);
+
 			state->continue_regions[state->continue_count] = *region_instr_index;
 			state->continue_count += 1;
 		}
 
-		control->next = state->control_flow_stmts;
-		state->control_flow_stmts = control;
 		break;
 	}
 	case AST_NODE_EXPR: 
