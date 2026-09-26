@@ -2000,35 +2000,23 @@ static void _merge_variants(FunctionCompiler* compiler,
 	profile_scope_end();
 }
 
-static void _fix_loop_control_jumps(InstrBuffer* instr_buffer,
-		ControlFlowStmt* stmts,
-		InstrIndex break_target,
-		InstrIndex continue_target) {
+static void _finish_regions_with_jumps(InstrBuffer* instr_buffer,
+		InstrIndex* regions,
+		size_t region_count,
+		InstrIndex target_region) {
 	profile_scope_start(__func__);
 
-	maybe(break_target.value == INVALID_INSTR_INDEX.value);
-	maybe(continue_target.value == INVALID_INSTR_INDEX.value);
+	assert(instr_buffer->instr[target_region.value].kind == INSTR_REGION);
 
-	for (ControlFlowStmt* stmt = stmts;
-			stmt != NULL;
-			stmt = stmt->next) {
-
-		const Instr* region = instr_buffer_at(instr_buffer, stmt->region);
+	for (size_t i = 0; i < region_count; i += 1) {
+		const Instr* region = instr_buffer_at(instr_buffer, regions[i]);
 		assert(region->kind == INSTR_REGION);
 
 		Instr* jump = instr_buffer_at(instr_buffer, region->region.last_instr);
 		assert(jump->kind == INSTR_JUMP);
 		assert(jump->jump.target_region.value == INVALID_INSTR_INDEX.value);
 
-		if (stmt->kind == CONTROL_FLOW_BREAK) {
-			assert(break_target.value != INVALID_INSTR_INDEX.value);
-			jump->jump.target_region = break_target;
-		} else if (stmt->kind == CONTROL_FLOW_CONTINUE) {
-			assert(continue_target.value != INVALID_INSTR_INDEX.value);
-			jump->jump.target_region = continue_target;
-		} else {
-			unreachable();
-		}
+		jump->jump.target_region = target_region;
 	}
 
 	profile_scope_end();
@@ -2339,9 +2327,17 @@ static InstrIndex _compile_loop(FunctionCompiler* compiler,
 	compiler->arg_states = original_arg_values;
 
 	// Now fix the jumps inserted by `break` and `continue` statements.
-	_fix_loop_control_jumps(instr_buffer,
-			compiler->loop_switch_state->control_flow_stmts,
-			post_loop_region_index, 
+
+	// `break`:
+	_finish_regions_with_jumps(instr_buffer,
+			current_loop_switch_state.break_regions,
+			current_loop_switch_state.break_count,
+			post_loop_region_index);
+
+	// `continue`:
+	_finish_regions_with_jumps(instr_buffer,
+			current_loop_switch_state.continue_regions,
+			current_loop_switch_state.continue_count,
 			condition_region);
 
 	arena_end_temp(temp);
@@ -2707,10 +2703,23 @@ static InstrIndex _compile_for_loop(FunctionCompiler* compiler,
 	}
 
 	// 13. Fix the jumps inserted by `break` and `continue` statements.
-	_fix_loop_control_jumps(instr_buffer,
-			compiler->loop_switch_state->control_flow_stmts,
-			post_loop_region_index, 
-			advance_region);
+
+	// `break`:
+	_finish_regions_with_jumps(instr_buffer,
+			current_loop_switch_state.break_regions,
+			current_loop_switch_state.break_count,
+			post_loop_region_index);
+
+	// `continue`:
+	if (advance_region.value == INVALID_INSTR_INDEX.value) {
+		assert(current_loop_switch_state.continue_count == 0);
+		assert(current_loop_switch_state.continue_capacity == 0);
+	} else {
+		_finish_regions_with_jumps(instr_buffer,
+				current_loop_switch_state.continue_regions,
+				current_loop_switch_state.continue_count,
+				advance_region);
+	}
 	
 	_reset_variables_in_scope(compiler, node->for_loop.loop_scope);
 
@@ -2949,9 +2958,17 @@ static InstrIndex _compile_do_while_loop(FunctionCompiler* compiler,
 	branch->branch.false_region = post_loop_region;
 
 	// Now fix the jumps inserted by `break` and `continue` statements.
-	_fix_loop_control_jumps(instr_buffer,
-			compiler->loop_switch_state->control_flow_stmts,
-			post_loop_region, 
+
+	// `break`:
+	_finish_regions_with_jumps(instr_buffer,
+			current_loop_switch_state.break_regions,
+			current_loop_switch_state.break_count,
+			post_loop_region);
+
+	// `continue`:
+	_finish_regions_with_jumps(instr_buffer,
+			current_loop_switch_state.continue_regions,
+			current_loop_switch_state.continue_count,
 			body_block.initial_region);
 
 	arena_end_temp(temp);
@@ -3561,10 +3578,10 @@ static void _compile_switch(FunctionCompiler* compiler,
 
 	InstrIndex post_switch_region_index = instr_new_region(instr_buffer, instr_allocator);
 
-	_fix_loop_control_jumps(instr_buffer,
-			compiler->loop_switch_state->control_flow_stmts,
-			post_switch_region_index,
-			INVALID_INSTR_INDEX);
+	_finish_regions_with_jumps(instr_buffer,
+			current_loop_switch_state.break_regions,
+			current_loop_switch_state.break_count,
+			post_switch_region_index);
 
 	if (!instr_region_finished(instr_buffer, true_region_index)) {
 		InstrIndex jump = instr_new_jump(instr_buffer,
