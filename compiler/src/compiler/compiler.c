@@ -106,6 +106,67 @@ static LoopSwitchState* _get_current_loop_state(FunctionCompiler* compiler) {
 	return NULL;
 }
 
+static void _enter_loop_switch_state(FunctionCompiler* compiler,
+		AstNode* node,
+		LoopSwitchState* state,
+		Arena* allocator) {
+	profile_scope_start(__func__);
+
+	size_t break_count = 0;
+	size_t continue_count = 0;
+
+	switch (node->kind) {
+	case AST_NODE_FOR_LOOP:
+		break_count = node->for_loop.break_count;
+		continue_count = node->for_loop.continue_count;
+		break;
+	case AST_NODE_WHILE_LOOP:
+		break_count = node->while_loop.break_count;
+		continue_count = node->while_loop.continue_count;
+		break;
+	case AST_NODE_SWITCH:
+		break_count = node->switch_stmt.break_count;
+		break;
+	default:
+		panic("Neither a loop nor a switch");
+	}
+
+	state->parent = compiler->loop_switch_state;
+	state->control_flow_stmts = NULL;
+	state->node = node;
+
+	state->break_count = 0;
+	state->break_capacity = break_count;
+
+	size_t var_count = compiler->var_count;
+	size_t arg_count = compiler->function->proto.parameter_count;
+
+	if (break_count > 0) {
+		state->break_var_values = arena_alloc_array(allocator, InstrIndex*, break_count);
+		state->break_arg_values = arena_alloc_array(allocator, InstrIndex*, break_count);
+		state->break_regions = arena_alloc_array(allocator, InstrIndex, break_count);
+	} else {
+		state->break_var_values = NULL;
+		state->break_arg_values = NULL;
+		state->break_regions = NULL;
+	}
+
+	state->continue_count = 0;
+	state->continue_capacity = continue_count;
+	if (continue_count > 0) {
+		state->continue_var_values = arena_alloc_array(allocator, InstrIndex*, continue_count);
+		state->continue_arg_values = arena_alloc_array(allocator, InstrIndex*, continue_count);
+		state->continue_regions = arena_alloc_array(allocator, InstrIndex, continue_count);
+	} else {
+		state->continue_var_values = NULL;
+		state->continue_arg_values = NULL;
+		state->continue_regions = NULL;
+	}
+
+	compiler->loop_switch_state = state;
+	profile_scope_end();
+}
+
 static void _restore_loop_switch_state(FunctionCompiler* compiler) {
 	assert(compiler->loop_switch_state);
 	if (compiler->loop_switch_state->control_flow_stmts) {
@@ -2080,35 +2141,8 @@ static InstrIndex _compile_loop(FunctionCompiler* compiler,
 
 	ArenaRegion temp = arena_begin_temp(compiler->temp_allocator);
 
-	LoopSwitchState current_loop_switch_state = (LoopSwitchState) {
-		.parent = compiler->loop_switch_state,
-		.control_flow_stmts = NULL,
-		.node = node,
-		.break_count = 0,
-		.break_capacity = node->while_loop.break_count,
-		.break_var_values = arena_alloc_array(compiler->temp_allocator,
-				InstrIndex*,
-				node->while_loop.break_count),
-		.break_arg_values = arena_alloc_array(compiler->temp_allocator,
-				InstrIndex*,
-				node->while_loop.break_count),
-		.break_regions = arena_alloc_array(compiler->temp_allocator,
-				InstrIndex,
-				node->while_loop.break_count),
-		.continue_count = 0,
-		.continue_capacity = node->while_loop.continue_count,
-		.continue_var_values = arena_alloc_array(compiler->temp_allocator,
-				InstrIndex*,
-				node->while_loop.continue_count),
-		.continue_arg_values = arena_alloc_array(compiler->temp_allocator,
-				InstrIndex*,
-				node->while_loop.continue_count),
-		.continue_regions = arena_alloc_array(compiler->temp_allocator,
-				InstrIndex,
-				node->while_loop.continue_count),
-	};
-
-	compiler->loop_switch_state = &current_loop_switch_state;
+	LoopSwitchState current_loop_switch_state = {};
+	_enter_loop_switch_state(compiler, node, &current_loop_switch_state, compiler->temp_allocator);
 
 	size_t arg_count = compiler->function->proto.parameter_count;
 	InstrBuffer* instr_buffer = &compiler->instr_buffer;
@@ -2357,35 +2391,8 @@ static InstrIndex _compile_for_loop(FunctionCompiler* compiler,
 	ArenaRegion temp = arena_begin_temp(compiler->temp_allocator);
 
 	// 1. Setup loop state
-	LoopSwitchState current_loop_switch_state = (LoopSwitchState) {
-		.parent = compiler->loop_switch_state,
-		.control_flow_stmts = NULL,
-		.node = node,
-		.break_count = 0,
-		.break_capacity = node->for_loop.break_count,
-		.break_var_values = arena_alloc_array(compiler->temp_allocator,
-				InstrIndex*,
-				node->for_loop.break_count),
-		.break_arg_values = arena_alloc_array(compiler->temp_allocator,
-				InstrIndex*,
-				node->for_loop.break_count),
-		.break_regions = arena_alloc_array(compiler->temp_allocator,
-				InstrIndex,
-				node->for_loop.break_count),
-		.continue_count = 0,
-		.continue_capacity = node->for_loop.continue_count,
-		.continue_var_values = arena_alloc_array(compiler->temp_allocator,
-				InstrIndex*,
-				node->for_loop.continue_count),
-		.continue_arg_values = arena_alloc_array(compiler->temp_allocator,
-				InstrIndex*,
-				node->for_loop.continue_count),
-		.continue_regions = arena_alloc_array(compiler->temp_allocator,
-				InstrIndex,
-				node->for_loop.continue_count),
-	};
-
-	compiler->loop_switch_state = &current_loop_switch_state;
+	LoopSwitchState current_loop_switch_state = {};
+	_enter_loop_switch_state(compiler, node, &current_loop_switch_state, compiler->temp_allocator);
 
 	// 2. Setup loop header
 	size_t arg_count = compiler->function->proto.parameter_count;
@@ -2741,35 +2748,8 @@ static InstrIndex _compile_do_while_loop(FunctionCompiler* compiler,
 	ArenaRegion temp = arena_begin_temp(compiler->temp_allocator);
 
 	// Save the previous loop state
-	LoopSwitchState current_loop_switch_state = (LoopSwitchState) {
-		.parent = compiler->loop_switch_state,
-		.control_flow_stmts = NULL,
-		.node = node,
-		.break_count = 0,
-		.break_capacity = node->while_loop.break_count,
-		.break_var_values = arena_alloc_array(compiler->temp_allocator,
-				InstrIndex*,
-				node->while_loop.break_count),
-		.break_arg_values = arena_alloc_array(compiler->temp_allocator,
-				InstrIndex*,
-				node->while_loop.break_count),
-		.break_regions = arena_alloc_array(compiler->temp_allocator,
-				InstrIndex,
-				node->while_loop.break_count),
-		.continue_count = 0,
-		.continue_capacity = node->while_loop.continue_count,
-		.continue_var_values = arena_alloc_array(compiler->temp_allocator,
-				InstrIndex*,
-				node->while_loop.continue_count),
-		.continue_arg_values = arena_alloc_array(compiler->temp_allocator,
-				InstrIndex*,
-				node->while_loop.continue_count),
-		.continue_regions = arena_alloc_array(compiler->temp_allocator,
-				InstrIndex,
-				node->while_loop.continue_count),
-	};
-
-	compiler->loop_switch_state = &current_loop_switch_state;
+	LoopSwitchState current_loop_switch_state = {};
+	_enter_loop_switch_state(compiler, node, &current_loop_switch_state, compiler->temp_allocator);
 
 	size_t arg_count = compiler->function->proto.parameter_count;
 	InstrBuffer* instr_buffer = &compiler->instr_buffer;
@@ -3269,28 +3249,8 @@ static void _compile_switch(FunctionCompiler* compiler,
 	InstrBuffer* instr_buffer = &compiler->instr_buffer;
 	Arena* instr_allocator = compiler->instr_allocator;
 
-	LoopSwitchState current_loop_switch_state = (LoopSwitchState) {
-		.parent = compiler->loop_switch_state,
-		.control_flow_stmts = NULL,
-		.node = stmt,
-		.break_capacity = stmt->switch_stmt.break_count,
-		.break_var_values = arena_alloc_array(compiler->temp_allocator,
-				InstrIndex*,
-				stmt->switch_stmt.break_count),
-		.break_arg_values = arena_alloc_array(compiler->temp_allocator,
-				InstrIndex*,
-				stmt->switch_stmt.break_count),
-		.break_regions = arena_alloc_array(compiler->temp_allocator,
-				InstrIndex,
-				stmt->switch_stmt.break_count),
-		.continue_count = 0,
-		.continue_capacity = 0,
-		.continue_var_values = NULL,
-		.continue_arg_values = NULL,
-		.continue_regions = NULL,
-	};
-
-	compiler->loop_switch_state = &current_loop_switch_state;
+	LoopSwitchState current_loop_switch_state = {};
+	_enter_loop_switch_state(compiler, stmt, &current_loop_switch_state, compiler->temp_allocator);
 
 	Type tested_expr_type;
 	expr_get_type(stmt->switch_stmt.expr, &tested_expr_type);
