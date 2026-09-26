@@ -1960,6 +1960,58 @@ struct LoopValuesSnapshot {
 	size_t count;
 };
 
+static BitArray _reserve_var_phis(FunctionCompiler* compiler,
+		Arena* filter_allocator,
+		InstrIndex* out_phis) {
+	profile_scope_start(__func__);
+
+	InstrBuffer* instr_buffer = &compiler->instr_buffer;
+	Arena* instr_allocator = compiler->instr_allocator;
+
+	BitArray filter = bit_array_alloc_zeros(filter_allocator, compiler->var_count);
+
+	for (size_t i = 0; i < compiler->var_count; i += 1) {
+		if (compiler->vars[i] == NULL) {
+			out_phis[i] = INVALID_INSTR_INDEX;
+			continue;
+		}
+
+		TypeKind var_type_kind = compiler->vars[i]->type.kind;
+		if (var_type_kind == TYPE_STRUCT
+				|| var_type_kind == TYPE_UNION
+				|| var_type_kind == TYPE_ARRAY) {
+			out_phis[i] = compiler->var_values[i];
+			continue;
+		}
+
+		bit_array_set(&filter, i, true);
+		out_phis[i] = instr_new_empty_phi(instr_buffer, instr_allocator);
+	}
+
+	profile_scope_end();
+	return filter;
+}
+
+static BitArray _reserve_arg_phis(FunctionCompiler* compiler,
+		Arena* filter_allocator,
+		InstrIndex* out_phis) {
+	profile_scope_start(__func__);
+
+
+	InstrBuffer* instr_buffer = &compiler->instr_buffer;
+	Arena* instr_allocator = compiler->instr_allocator;
+
+	size_t arg_count = compiler->function->proto.parameter_count;
+	for (size_t phi_index = 0; phi_index < arg_count; phi_index++) {
+		out_phis[phi_index] = instr_new_empty_phi(instr_buffer, instr_allocator);
+	}
+
+	BitArray filter = bit_array_alloc_ones(filter_allocator, arg_count);
+
+	profile_scope_end();
+	return filter;
+}
+
 // The number of snapshots is usually very low.
 static void _merge_variants(FunctionCompiler* compiler,
 		InstrIndex* phis,
@@ -1967,6 +2019,7 @@ static void _merge_variants(FunctionCompiler* compiler,
 		const LoopValuesSnapshot* snapshots,
 		size_t snapshot_count,
 		BitArray filter) {
+	profile_scope_start(__func__);
 	assert(phi_count == filter.bit_count);
 
 	size_t variant_count = 0;
@@ -2011,6 +2064,8 @@ static void _merge_variants(FunctionCompiler* compiler,
 		phi->kind = INSTR_PHI;
 		phi->phi.variants = select_inputs_buffer;
 	}
+
+	profile_scope_end();
 }
 
 static void _fix_loop_control_jumps(InstrBuffer* instr_buffer,
@@ -2173,34 +2228,9 @@ static InstrIndex _compile_loop(FunctionCompiler* compiler,
 			InstrIndex,
 			arg_count);
 
-	BitArray var_filter = bit_array_alloc(compiler->temp_allocator, compiler->var_count);
-	bit_array_clear(&var_filter);
-
 	// Replace current variables and arguments with phis
-	for (size_t i = 0; i < compiler->var_count; i += 1) {
-		if (compiler->vars[i] == NULL) {
-			var_phis[i] = INVALID_INSTR_INDEX;
-			continue;
-		}
-
-		TypeKind var_type_kind = compiler->vars[i]->type.kind;
-		if (var_type_kind == TYPE_STRUCT
-				|| var_type_kind == TYPE_UNION
-				|| var_type_kind == TYPE_ARRAY) {
-			var_phis[i] = original_var_values[i];
-			continue;
-		}
-
-		bit_array_set(&var_filter, i, true);
-		var_phis[i] = instr_new_empty_phi(instr_buffer, instr_allocator);
-	}
-
-	BitArray arg_filter = bit_array_alloc(compiler->temp_allocator, arg_count);
-	bit_array_fill(&arg_filter, true);
-
-	for (size_t i = 0; i < arg_count; i += 1) {
-		arg_phis[i] = instr_new_empty_phi(instr_buffer, instr_allocator);
-	}
+	BitArray var_filter = _reserve_var_phis(compiler, compiler->temp_allocator, var_phis);
+	BitArray arg_filter = _reserve_arg_phis(compiler, compiler->temp_allocator, arg_phis);
 
 	// Copy arrays with the replaced phis, for the inner loop body to modify them
 	InstrIndex* var_values_for_body = arena_alloc_array(compiler->temp_allocator,

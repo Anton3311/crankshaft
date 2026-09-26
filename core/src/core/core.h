@@ -745,6 +745,18 @@ inline void bit_array_fill(BitArray* array, bool value) {
 	}
 }
 
+inline BitArray bit_array_alloc_zeros(Arena* arena, size_t bit_count) {
+	BitArray array = bit_array_alloc(arena, bit_count);
+	bit_array_fill(&array, false);
+	return array;
+}
+
+inline BitArray bit_array_alloc_ones(Arena* arena, size_t bit_count) {
+	BitArray array = bit_array_alloc(arena, bit_count);
+	bit_array_fill(&array, true);
+	return array;
+}
+
 inline bool bit_array_get(const BitArray* array, size_t index) {
 	assert(index < array->bit_count);
 	static_assert(sizeof(*array->values) == sizeof(uint8_t), "");
