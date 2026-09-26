@@ -737,6 +737,14 @@ inline void bit_array_clear(BitArray* array) {
 	memset(array->values, 0, (array->bit_count + 7) / 8);
 }
 
+inline void bit_array_fill(BitArray* array, bool value) {
+	if (value) {
+		memset(array->values, 0xff, (array->bit_count + 7) / 8);
+	} else {
+		memset(array->values, 0x0, (array->bit_count + 7) / 8);
+	}
+}
+
 inline bool bit_array_get(const BitArray* array, size_t index) {
 	assert(index < array->bit_count);
 	static_assert(sizeof(*array->values) == sizeof(uint8_t), "");

@@ -69,6 +69,18 @@ struct LoopSwitchState {
 	ControlFlowStmt* control_flow_stmts;
 
 	AstNode* node;
+
+	InstrIndex** break_var_values;
+	InstrIndex** break_arg_values;
+	InstrIndex* break_regions;
+	size_t break_count;
+	size_t break_capacity;
+
+	InstrIndex** continue_var_values;
+	InstrIndex** continue_arg_values;
+	InstrIndex* continue_regions;
+	size_t continue_count;
+	size_t continue_capacity;
 };
 
 typedef struct {

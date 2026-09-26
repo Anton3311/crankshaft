@@ -1953,6 +1953,66 @@ static void _merge_pre_loop_and_inner_values(FunctionCompiler* compiler,
 	profile_scope_end();
 }
 
+typedef struct LoopValuesSnapshot LoopValuesSnapshot;
+struct LoopValuesSnapshot {
+	InstrIndex** entries;
+	InstrIndex* regions;
+	size_t count;
+};
+
+// The number of snapshots is usually very low.
+static void _merge_variants(FunctionCompiler* compiler,
+		InstrIndex* phis,
+		size_t phi_count,
+		const LoopValuesSnapshot* snapshots,
+		size_t snapshot_count,
+		BitArray filter) {
+	assert(phi_count == filter.bit_count);
+
+	size_t variant_count = 0;
+	for (size_t i = 0; i < snapshot_count; i += 1) {
+		variant_count += snapshots[i].count;
+	}
+
+	InstrBuffer* instr_buffer = &compiler->instr_buffer;
+	Arena* instr_allocator = compiler->instr_allocator;
+
+	for (size_t phi_index = 0; phi_index < phi_count; phi_index++) {
+		if (!bit_array_get(&filter, phi_index)) {
+			continue;
+		}
+
+		Instr* phi = instr_buffer_at(instr_buffer, phis[phi_index]);
+		assert(phi->kind == INSTR_PHI);
+		assert(phi->phi.variants.start == UINT16_MAX);
+		assert(phi->phi.variants.count == UINT16_MAX);
+
+		InstrInputs select_inputs_buffer = instr_allocate_inputs_array(instr_buffer, variant_count);
+		InstrIndex* select_inputs = &instr_buffer->inputs_buffer[select_inputs_buffer.start];
+
+		size_t variant_index = 0;
+
+		for (size_t snapshot_index = 0; snapshot_index < snapshot_count; snapshot_index += 1) {
+			LoopValuesSnapshot snapshot = snapshots[snapshot_index];
+			for (size_t entry_index = 0; entry_index < snapshot.count; entry_index += 1) {
+				InstrIndex select_index = instr_buffer_append(instr_buffer, instr_allocator);
+				Instr* select = instr_buffer_at(instr_buffer, select_index);
+				select->kind = INSTR_SELECT;
+				select->select.value = snapshot.entries[entry_index][phi_index];
+				select->select.region = snapshot.regions[entry_index];
+
+				select_inputs[variant_index] = select_index;
+				variant_index += 1;
+			}
+		}
+
+		assert(variant_index == variant_count);
+
+		phi->kind = INSTR_PHI;
+		phi->phi.variants = select_inputs_buffer;
+	}
+}
+
 static void _fix_loop_control_jumps(InstrBuffer* instr_buffer,
 		ControlFlowStmt* stmts,
 		InstrIndex break_target,
@@ -2049,6 +2109,28 @@ static InstrIndex _compile_loop(FunctionCompiler* compiler,
 		.parent = compiler->loop_switch_state,
 		.control_flow_stmts = NULL,
 		.node = node,
+		.break_count = 0,
+		.break_capacity = node->while_loop.break_count,
+		.break_var_values = arena_alloc_array(compiler->temp_allocator,
+				InstrIndex*,
+				node->while_loop.break_count),
+		.break_arg_values = arena_alloc_array(compiler->temp_allocator,
+				InstrIndex*,
+				node->while_loop.break_count),
+		.break_regions = arena_alloc_array(compiler->temp_allocator,
+				InstrIndex,
+				node->while_loop.break_count),
+		.continue_count = 0,
+		.continue_capacity = node->while_loop.continue_count,
+		.continue_var_values = arena_alloc_array(compiler->temp_allocator,
+				InstrIndex*,
+				node->while_loop.continue_count),
+		.continue_arg_values = arena_alloc_array(compiler->temp_allocator,
+				InstrIndex*,
+				node->while_loop.continue_count),
+		.continue_regions = arena_alloc_array(compiler->temp_allocator,
+				InstrIndex,
+				node->while_loop.continue_count),
 	};
 
 	compiler->loop_switch_state = &current_loop_switch_state;
@@ -2091,6 +2173,9 @@ static InstrIndex _compile_loop(FunctionCompiler* compiler,
 			InstrIndex,
 			arg_count);
 
+	BitArray var_filter = bit_array_alloc(compiler->temp_allocator, compiler->var_count);
+	bit_array_clear(&var_filter);
+
 	// Replace current variables and arguments with phis
 	for (size_t i = 0; i < compiler->var_count; i += 1) {
 		if (compiler->vars[i] == NULL) {
@@ -2106,8 +2191,12 @@ static InstrIndex _compile_loop(FunctionCompiler* compiler,
 			continue;
 		}
 
+		bit_array_set(&var_filter, i, true);
 		var_phis[i] = instr_new_empty_phi(instr_buffer, instr_allocator);
 	}
+
+	BitArray arg_filter = bit_array_alloc(compiler->temp_allocator, arg_count);
+	bit_array_fill(&arg_filter, true);
 
 	for (size_t i = 0; i < arg_count; i += 1) {
 		arg_phis[i] = instr_new_empty_phi(instr_buffer, instr_allocator);
@@ -2178,13 +2267,66 @@ static InstrIndex _compile_loop(FunctionCompiler* compiler,
 		}
 	}
 
-	_merge_pre_loop_and_inner_values(compiler,
-			var_phis,
-			arg_phis,
-			original_var_values,
-			original_arg_values,
-			pre_loop_region_index,
-			body_block.final_region);
+	{
+		LoopValuesSnapshot var_snapshots[] = {
+			(LoopValuesSnapshot) {
+				.entries = &original_var_values,
+				.regions = &pre_loop_region_index,
+				.count = 1,
+			},
+			(LoopValuesSnapshot) {
+				.entries = &compiler->var_values,
+				.regions = &body_block.final_region,
+				.count = 1,
+			},
+			(LoopValuesSnapshot) {
+				.entries = current_loop_switch_state.break_var_values,
+				.regions = current_loop_switch_state.break_regions,
+				.count = current_loop_switch_state.break_count,
+			},
+			(LoopValuesSnapshot) {
+				.entries = current_loop_switch_state.continue_var_values,
+				.regions = current_loop_switch_state.continue_regions,
+				.count = current_loop_switch_state.continue_count,
+			},
+		};
+
+		_merge_variants(compiler,
+				var_phis,
+				compiler->var_count,
+				var_snapshots,
+				array_size(var_snapshots), var_filter);
+
+		LoopValuesSnapshot arg_snapshots[] = {
+			(LoopValuesSnapshot) {
+				.entries = &original_arg_values,
+				.regions = &pre_loop_region_index,
+				.count = 1,
+			},
+			(LoopValuesSnapshot) {
+				.entries = &compiler->arg_states,
+				.regions = &body_block.final_region,
+				.count = 1,
+			},
+			(LoopValuesSnapshot) {
+				.entries = current_loop_switch_state.break_arg_values,
+				.regions = current_loop_switch_state.break_regions,
+				.count = current_loop_switch_state.break_count,
+			},
+			(LoopValuesSnapshot) {
+				.entries = current_loop_switch_state.continue_arg_values,
+				.regions = current_loop_switch_state.continue_regions,
+				.count = current_loop_switch_state.continue_count,
+			},
+		};
+
+		_merge_variants(compiler,
+				arg_phis,
+				arg_count,
+				arg_snapshots,
+				array_size(arg_snapshots), arg_filter);
+	}
+
 
 	array_copy(original_var_values, var_phis, compiler->var_count);
 	array_copy(original_arg_values, arg_phis, arg_count);
@@ -2374,6 +2516,28 @@ static InstrIndex _compile_for_loop(FunctionCompiler* compiler,
 		.parent = compiler->loop_switch_state,
 		.control_flow_stmts = NULL,
 		.node = node,
+		.break_count = 0,
+		.break_capacity = node->for_loop.break_count,
+		.break_var_values = arena_alloc_array(compiler->temp_allocator,
+				InstrIndex*,
+				node->for_loop.break_count),
+		.break_arg_values = arena_alloc_array(compiler->temp_allocator,
+				InstrIndex*,
+				node->for_loop.break_count),
+		.break_regions = arena_alloc_array(compiler->temp_allocator,
+				InstrIndex,
+				node->for_loop.break_count),
+		.continue_count = 0,
+		.continue_capacity = node->for_loop.continue_count,
+		.continue_var_values = arena_alloc_array(compiler->temp_allocator,
+				InstrIndex*,
+				node->for_loop.continue_count),
+		.continue_arg_values = arena_alloc_array(compiler->temp_allocator,
+				InstrIndex*,
+				node->for_loop.continue_count),
+		.continue_regions = arena_alloc_array(compiler->temp_allocator,
+				InstrIndex,
+				node->for_loop.continue_count),
 	};
 
 	compiler->loop_switch_state = &current_loop_switch_state;
@@ -2686,6 +2850,28 @@ static InstrIndex _compile_do_while_loop(FunctionCompiler* compiler,
 		.parent = compiler->loop_switch_state,
 		.control_flow_stmts = NULL,
 		.node = node,
+		.break_count = 0,
+		.break_capacity = node->while_loop.break_count,
+		.break_var_values = arena_alloc_array(compiler->temp_allocator,
+				InstrIndex*,
+				node->while_loop.break_count),
+		.break_arg_values = arena_alloc_array(compiler->temp_allocator,
+				InstrIndex*,
+				node->while_loop.break_count),
+		.break_regions = arena_alloc_array(compiler->temp_allocator,
+				InstrIndex,
+				node->while_loop.break_count),
+		.continue_count = 0,
+		.continue_capacity = node->while_loop.continue_count,
+		.continue_var_values = arena_alloc_array(compiler->temp_allocator,
+				InstrIndex*,
+				node->while_loop.continue_count),
+		.continue_arg_values = arena_alloc_array(compiler->temp_allocator,
+				InstrIndex*,
+				node->while_loop.continue_count),
+		.continue_regions = arena_alloc_array(compiler->temp_allocator,
+				InstrIndex,
+				node->while_loop.continue_count),
 	};
 
 	compiler->loop_switch_state = &current_loop_switch_state;
@@ -3223,6 +3409,21 @@ static void _compile_switch(FunctionCompiler* compiler,
 		.parent = compiler->loop_switch_state,
 		.control_flow_stmts = NULL,
 		.node = stmt,
+		.break_capacity = stmt->switch_stmt.break_count,
+		.break_var_values = arena_alloc_array(compiler->temp_allocator,
+				InstrIndex*,
+				stmt->switch_stmt.break_count),
+		.break_arg_values = arena_alloc_array(compiler->temp_allocator,
+				InstrIndex*,
+				stmt->switch_stmt.break_count),
+		.break_regions = arena_alloc_array(compiler->temp_allocator,
+				InstrIndex,
+				stmt->switch_stmt.break_count),
+		.continue_count = 0,
+		.continue_capacity = 0,
+		.continue_var_values = NULL,
+		.continue_arg_values = NULL,
+		.continue_regions = NULL,
 	};
 
 	compiler->loop_switch_state = &current_loop_switch_state;
@@ -3628,17 +3829,20 @@ static void _compile_single_node(FunctionCompiler* compiler,
 		break;
 	case AST_NODE_BREAK:
 	case AST_NODE_CONTINUE: {
-
+		LoopSwitchState* state = NULL;
 		if (node->kind == AST_NODE_BREAK) {
+			state = compiler->loop_switch_state;
 			assert_msg(compiler->loop_switch_state,
 					"`break` statement appears outside of a loop or a switch");
 			assert(compiler->loop_switch_state->node);
 		} else if (node->kind == AST_NODE_CONTINUE) {
-			LoopSwitchState* loop = _get_current_loop_state(compiler);
-			assert_msg(loop,
+			state = _get_current_loop_state(compiler);
+			assert_msg(state,
 					"`break` statement appears outside of a loop");
-			assert(loop->node);
 		}
+
+		assert(state);
+		assert(state->node);
 
 		InstrIndex jump = instr_new_jump(instr_buffer,
 				instr_allocator,
@@ -3658,9 +3862,20 @@ static void _compile_single_node(FunctionCompiler* compiler,
 		array_copy(control->var_values, compiler->var_values, compiler->var_count);
 		array_copy(control->arg_values, compiler->arg_states, arg_count);
 
-		LoopSwitchState* state = compiler->loop_switch_state;
-		if (node->kind == AST_NODE_CONTINUE) {
-			state = _get_current_loop_state(compiler);
+		if (node->kind == AST_NODE_BREAK) {
+			assert(state->break_count < state->break_capacity);
+
+			state->break_var_values[state->break_count] = control->var_values;
+			state->break_arg_values[state->break_count] = control->arg_values;
+			state->break_regions[state->break_count] = *region_instr_index;
+			state->break_count += 1;
+		} else if (node->kind == AST_NODE_CONTINUE) {
+			assert(state->continue_count < state->continue_capacity);
+
+			state->continue_var_values[state->continue_count] = control->var_values;
+			state->continue_arg_values[state->continue_count] = control->arg_values;
+			state->continue_regions[state->continue_count] = *region_instr_index;
+			state->continue_count += 1;
 		}
 
 		control->next = state->control_flow_stmts;
