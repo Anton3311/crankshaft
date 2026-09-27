@@ -19,8 +19,10 @@ void test_self_hosted_tokenizer(TestContext* context, String test_file_path) {
 			context->arena,
 			context->temp_arena);
 
-	assert(process_result == PROCESS_RUN_OK);
-	assert(exit_code == 0);
+	if (process_result != PROCESS_RUN_OK || exit_code != 0) {
+		printf("%.*s\n", STR_FMT(output));
+		panic("Failed to compile");
+	}
 
 	String source_code = read_entire_file_to_str(
 			str_to_cstr(test_file_path, context->temp_arena),
