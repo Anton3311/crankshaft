@@ -2223,6 +2223,7 @@ static InstrIndex _compile_loop(FunctionCompiler* compiler,
 	}
 
 	{
+		bool body_finished = instr_region_finished(instr_buffer, body_block.final_region);
 		LoopValuesSnapshot var_snapshots[] = {
 			(LoopValuesSnapshot) {
 				.entries = &original_var_values,
@@ -2232,7 +2233,7 @@ static InstrIndex _compile_loop(FunctionCompiler* compiler,
 			(LoopValuesSnapshot) {
 				.entries = &compiler->var_values,
 				.regions = &body_block.final_region,
-				.count = 1,
+				.count = body_finished ? 0 : 1,
 			},
 			(LoopValuesSnapshot) {
 				.entries = current_loop_switch_state.break_var_values,
@@ -2263,7 +2264,7 @@ static InstrIndex _compile_loop(FunctionCompiler* compiler,
 			(LoopValuesSnapshot) {
 				.entries = &compiler->arg_states,
 				.regions = &body_block.final_region,
-				.count = 1,
+				.count = body_finished ? 0 : 1,
 			},
 			(LoopValuesSnapshot) {
 				.entries = current_loop_switch_state.break_arg_values,

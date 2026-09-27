@@ -1,5 +1,7 @@
 #include <stdint.h>
 
+#include <stdio.h>
+
 __declspec(dllimport) void* malloc(size_t count);
 __declspec(dllimport) void free(void* ptr);
 __declspec(dllimport) void panic(const char*);
