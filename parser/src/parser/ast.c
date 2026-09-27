@@ -1,5 +1,12 @@
 #include "ast.h"
 
+void scope_append(Scope* scope, AstNode* node) {
+	assert(node->parent_scope == NULL);
+
+	parsed_node_list_append(&scope->nodes, node);
+	node->parent_scope = scope;
+}
+
 TypeLayout type_get_layout(const TypeContext* context, const Type* type) {
 	switch (type->kind) {
 	case TYPE_VOID:

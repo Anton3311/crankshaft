@@ -80,6 +80,8 @@ struct Scope {
 	NodeList nodes;
 };
 
+void scope_append(Scope* scope, AstNode* node);
+
 struct ExprArray {
 	Expr** exprs;
 	size_t count;

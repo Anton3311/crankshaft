@@ -3973,37 +3973,29 @@ static AstNode* _parser_parse_if_stmt(Parser* parser) {
 		return NULL;
 	}
 
-	AstNode* true_node = NULL;
-	AstNode* false_node = NULL;
-
-	Scope* true_node_scope = NULL;
-	Scope* false_node_scope = NULL;
+	AstNode* node = arena_alloc_zeroed(parser->ast_allocator, AstNode);
+	node->kind = AST_NODE_IF;
+	node->if_stmt.condition = condition;
 
 	Token true_node_token = preprocessor_view_next(parser->preprocessor);
 
 	{
 		ident_storage_begin_scope(parser->ident_storage);
 
-		true_node_scope = arena_alloc_zeroed(parser->ast_allocator, Scope);
-		true_node_scope->id = parser->ident_storage->current_scope->id;
+		node->if_stmt.true_scope= arena_alloc_zeroed(parser->ast_allocator, Scope);
+		node->if_stmt.true_scope->id = parser->ident_storage->current_scope->id;
 
-		true_node = _parser_parse_single_node(parser, true_node_token);
+		AstNode* true_node = _parser_parse_single_node(parser, true_node_token);
 		if (true_node) {
-			true_node->parent_scope = true_node_scope;
-			true_node_scope->nodes.first = true_node;
-			true_node_scope->nodes.last = true_node;
+			scope_append(node->if_stmt.true_scope, true_node);
+		} else {
+			diagnostics_report_error(parser->diagnostics,
+					true_node_token.source_range,
+					STR_LIT("Expected a statement after if condition"),
+					NULL);
 		}
 
 		ident_storage_end_scope(parser->ident_storage);
-	}
-
-	if (true_node == NULL) {
-		diagnostics_report_error(parser->diagnostics,
-				true_node_token.source_range,
-				STR_LIT("Expected a statement if condition"),
-				NULL);
-		profile_scope_end();
-		return NULL;
 	}
 
 	Token maybe_else = preprocessor_view_next(parser->preprocessor);
@@ -4015,36 +4007,25 @@ static AstNode* _parser_parse_if_stmt(Parser* parser) {
 		{
 			ident_storage_begin_scope(parser->ident_storage);
 
-			false_node_scope = arena_alloc_zeroed(parser->ast_allocator, Scope);
-			false_node_scope->id = parser->ident_storage->current_scope->id;
+			node->if_stmt.false_scope = arena_alloc_zeroed(parser->ast_allocator, Scope);
+			node->if_stmt.false_scope->id = parser->ident_storage->current_scope->id;
 
-			false_node = _parser_parse_single_node(parser, false_node_token);
+			AstNode* false_node = _parser_parse_single_node(parser, false_node_token);
 			if (false_node) {
-				false_node->parent_scope = false_node_scope;
-				false_node_scope->nodes.first = false_node;
-				false_node_scope->nodes.last = false_node;
+				scope_append(node->if_stmt.false_scope, false_node);
+			} else {
+				diagnostics_report_error(parser->diagnostics,
+						false_node_token.source_range,
+						STR_LIT("Expected a statement after else"),
+						NULL);
 			}
 
 			ident_storage_end_scope(parser->ident_storage);
 		}
-
-		if (false_node == NULL) {
-			diagnostics_report_error(parser->diagnostics,
-					false_node_token.source_range,
-					STR_LIT("Expected a statement after else"),
-					NULL);
-			profile_scope_end();
-			return NULL;
-		}
 	}
 
-	AstNode* if_stmt_node = arena_alloc_zeroed(parser->ast_allocator, AstNode);
-	if_stmt_node->kind = AST_NODE_IF;
-	if_stmt_node->if_stmt.condition = condition;
-	if_stmt_node->if_stmt.true_scope = true_node_scope;
-	if_stmt_node->if_stmt.false_scope = false_node_scope;
 	profile_scope_end();
-	return if_stmt_node;
+	return node;
 }
 
 typedef struct {
@@ -4071,15 +4052,10 @@ static LoopBody _parser_parse_loop_body(Parser* parser, AstNode* node) {
 
 	if (body_token.kind != TOKEN_SEMICOLON) {
 		body = _parser_parse_single_node(parser, body_token);
+		scope_append(scope, body);
 	}
 
 	ident_storage_end_scope(parser->ident_storage);
-
-	if (body) {
-		body->parent_scope = scope;
-		scope->nodes.first = body;
-		scope->nodes.last = body;
-	}
 
 	parser->loop_or_switch_state = parser->loop_or_switch_state->parent;
 
@@ -4214,26 +4190,28 @@ static AstNode* _parser_parse_for_loop(Parser* parser) {
 				array_size(expected_tokens));
 	}
 
-	AstNode* init_stmt = NULL;
 	bool has_condition_expr = false;
 	Expr condition_expr;
 	bool has_advance_expr = false;
 	Expr advance_expr;
-
-	uint64_t loop_scope_id;
 
 	AstNode* loop = arena_alloc_zeroed(parser->ast_allocator, AstNode);
 	loop->kind = AST_NODE_FOR_LOOP;
 
 	{
 		ident_storage_begin_scope(parser->ident_storage);
-		loop_scope_id = parser->ident_storage->current_scope->id;
+	
+		Scope* scope = arena_alloc_zeroed(parser->ast_allocator, Scope);
+		scope->id = parser->ident_storage->current_scope->id;
+		loop->for_loop.loop_scope = scope;
 
 		Token init_stmt_token = preprocessor_view_next(parser->preprocessor);
 
 		if (init_stmt_token.kind != TOKEN_SEMICOLON) {
 			// FIXME: `_parser_parse_single_node` also consumes the `;`
-			init_stmt = _parser_parse_single_node(parser, init_stmt_token);
+			AstNode* init_stmt = _parser_parse_single_node(parser, init_stmt_token);
+			loop->for_loop.init_stmt = init_stmt;
+			scope_append(scope, init_stmt);
 		} else {
 			_parser_consume_semicolon(parser);
 		}
@@ -4262,18 +4240,6 @@ static AstNode* _parser_parse_for_loop(Parser* parser) {
 
 		ident_storage_end_scope(parser->ident_storage);
 	}
-
-	Scope* scope = arena_alloc_zeroed(parser->ast_allocator, Scope);
-	scope->id = loop_scope_id;
-
-	if (init_stmt) {
-		init_stmt->parent_scope = scope;
-		scope->nodes.first = init_stmt;
-		scope->nodes.last = init_stmt;
-	}
-
-	loop->for_loop.init_stmt = init_stmt;
-	loop->for_loop.loop_scope = scope;
 
 	if (has_condition_expr) {
 		loop->for_loop.condition = arena_alloc(parser->ast_allocator, Expr);
@@ -4621,8 +4587,7 @@ bool _parser_parse_scope(Parser* parser, Scope* out_scope) {
 
 		AstNode* node = _parser_parse_single_node(parser, token);
 		if (node) {
-			parsed_node_list_append(&out_scope->nodes, node);
-			node->parent_scope = out_scope;
+			scope_append(out_scope, node);
 		} else {
 			preprocessor_next_token(parser->preprocessor);
 		}
