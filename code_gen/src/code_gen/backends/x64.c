@@ -2795,6 +2795,39 @@ static InstrIndexArray _gather_scheduled_regions(X64CodeGenerator* gen, InstrInd
 	return regions;
 }
 
+static void _print_stats(X64CodeGenerator* gen,
+		InstrIndexArray scheduled_regions,
+		InstrIndexArray* scheduled_instr) {
+
+	size_t total_machine_instr_count = 0;
+	size_t total_ir_instr_count = 0;
+	size_t total_code_size = 0;
+
+	for (size_t i = 0; i < scheduled_regions.count; i += 1) {
+		InstrIndex region_instr = scheduled_regions.instr[i];
+		const Instr* instr = &gen->instr_buffer.instr[region_instr.value];
+		InstrIndexArray scheduled = scheduled_instr[instr->region.id];
+
+		total_ir_instr_count += scheduled.count;
+	}
+
+	for (size_t i = 0; i < scheduled_regions.count; i += 1) {
+		InstrIndex region_instr = scheduled_regions.instr[i];
+		const Instr* instr = &gen->instr_buffer.instr[region_instr.value];
+
+		CodeBuffer* code_buffer = &gen->per_region_code_buffer[instr->region.id];
+		total_machine_instr_count += code_buffer->instruction_count;
+		total_code_size += code_buffer->size;
+	}
+
+	printf("-- unit: %.*s --\n", STR_FMT(gen->unit_name));
+	printf("       ir instructions: %zu\n", total_ir_instr_count);
+	printf("            ir regions: %zu\n", scheduled_regions.count);
+	printf("  machine instructions: %zu\n", total_machine_instr_count);
+	printf("     machine code size: %zu bytes\n", total_code_size);
+	printf("\n");
+}
+
 LoweredFunction x64_generate_code(X64CodeGenerator* gen, InstrIndex root_region) {
 	profile_scope_start(__func__);
 
@@ -3012,7 +3045,17 @@ LoweredFunction x64_generate_code(X64CodeGenerator* gen, InstrIndex root_region)
 				code_block_offsets,
 				&control_instr_buffer);
 
+		// NOTE: `control_instr_buffer` is a temporary one, so manually merge instruction count with
+		//       the original `CodeBuffer`
+		gen->per_region_code_buffer[region_id].instruction_count
+			+= control_instr_buffer.instruction_count;
+
 		assert(control_instr_buffer.size == control_instr_buffer.capacity);
+	}
+
+	// Collects statistics
+	if (has_flag(gen->flags, X64_PRINT_STATS)) {
+		_print_stats(gen, scheduled_regions, scheduling_result.scheduled_instr);
 	}
 
 	const InstrBuffer* instr_buffer = &gen->instr_buffer;

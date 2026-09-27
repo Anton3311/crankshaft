@@ -40,7 +40,8 @@ static const char* s_help_menu =
 	"  Backend flags:           \n"
 	"    --show-ir              print generated IR instructions\n"
 	"    --x64-debug-log        log results of intermediate operations for debugging\n"
-	"    --x64-show-instr-loc   print which storage locations were assigned to each instruction";
+	"    --x64-show-instr-loc   print which storage locations were assigned to each instruction\n"
+	"    --x64-show-stats       print statistics about the emitted code";
 
 typedef struct {
 	Arena* arena;
@@ -178,6 +179,7 @@ static LoweredUnit compile_unit(CompilationUnitContext* context) {
 		CompiledFunction compiled_function = function_compiler_compile(&c);
 
 		X64CodeGenerator gen = {};
+		gen.unit_name = node->function_def->proto.name;
 		gen.flags = context->backend_flags;
 		gen.instr_buffer = compiled_function.instr_buffer;
 		gen.allocator = context->arena;
@@ -284,6 +286,8 @@ int main(int argc, char *argv[]) {
 				backend_flags |= X64_DEBUG_LOG;
 			} else if (str_equal(arg, STR_LIT("--x64-show-instr-loc"))) {
 				backend_flags |= X64_PRINT_ASSIGNED_STORAGE_LOC;
+			} else if (str_equal(arg, STR_LIT("--x64-show-stats"))) {
+				backend_flags |= X64_PRINT_STATS;
 			} else if (str_equal(arg, STR_LIT("--"))) {
 				break;
 			} else if (str_equal(arg, STR_LIT("--no-report-exit-code"))) {

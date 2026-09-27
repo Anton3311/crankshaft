@@ -42,6 +42,7 @@ typedef enum {
 	X64_DEBUG_LOG                  = 1 << 1,
 	X64_PRINT_ASSIGNED_STORAGE_LOC = 1 << 2,
 	X64_SKIP_REG_ALLOC             = 1 << 3,
+	X64_PRINT_STATS                = 1 << 4,
 } X64BackendFlags;
 
 typedef struct {
@@ -79,6 +80,8 @@ typedef struct {
 
 typedef struct {
 	X64BackendFlags flags;
+
+	String unit_name;
 
 	InstrBuffer instr_buffer;
 	InstrLiveRange* live_ranges;

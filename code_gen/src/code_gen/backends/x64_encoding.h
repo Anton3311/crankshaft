@@ -14,6 +14,8 @@ typedef struct {
 	size_t size;
 	size_t capacity;
 	Arena* allocator;
+
+	size_t instruction_count;
 } CodeBuffer;
 
 void code_buffer_init(CodeBuffer* buffer, Arena* allocator);

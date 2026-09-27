@@ -628,5 +628,7 @@ void encode_n(CodeBuffer* code_buffer,
 	uint8_t* output_buffer = code_buffer_append(code_buffer, encoding_length);
 	memcpy(output_buffer, encoding_buffer, encoding_length);
 
+	code_buffer->instruction_count += 1;
+
 	profile_scope_end();
 }
