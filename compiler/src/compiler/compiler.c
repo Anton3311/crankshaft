@@ -2959,7 +2959,7 @@ static InstrIndex _compile_if_statement(FunctionCompiler* compiler,
 
 	compiler->io_state = instr_new_io_state(instr_buffer, instr_allocator, INVALID_INSTR_INDEX);
 
-	InstrIndex post_branch_region_index = instr_new_region(instr_buffer, instr_allocator);
+	InstrIndex post_branch_region_index = INVALID_INSTR_INDEX;
 
 	CompiledBlockRegions true_block;
 	CompiledBlockRegions false_block;
@@ -3021,6 +3021,9 @@ static InstrIndex _compile_if_statement(FunctionCompiler* compiler,
 		true_block = _compile_scope(compiler, node->if_stmt.true_scope);
 
 		if (!instr_region_finished(instr_buffer, true_block.final_region)) {
+			assert(post_branch_region_index.value == INVALID_INSTR_INDEX.value);
+			post_branch_region_index = instr_new_region(instr_buffer, instr_allocator);
+
 			Instr* true_region = instr_buffer_at(instr_buffer, true_block.final_region);
 			true_region->region.last_instr = instr_new_jump(instr_buffer,
 					instr_allocator,
@@ -3044,6 +3047,10 @@ static InstrIndex _compile_if_statement(FunctionCompiler* compiler,
 		}
 
 		if (!instr_region_finished(instr_buffer, false_block.final_region)) {
+			if (post_branch_region_index.value == INVALID_INSTR_INDEX.value) {
+				post_branch_region_index = instr_new_region(instr_buffer, instr_allocator);
+			}
+
 			Instr* false_region = instr_buffer_at(instr_buffer, false_block.final_region);
 			false_region->region.last_instr = instr_new_jump(instr_buffer,
 					instr_allocator,
@@ -3055,7 +3062,17 @@ static InstrIndex _compile_if_statement(FunctionCompiler* compiler,
 					INVALID_INSTR_INDEX);
 		}
 
-		const Scope* if_parent_scope = node->parent_scope;
+		InstrIndex post_branch_region_index = INVALID_INSTR_INDEX;
+
+		bool true_path_finished = instr_region_finished(instr_buffer, true_block.final_region);
+		bool false_path_finished = instr_region_finished(instr_buffer, false_block.final_region);
+		bool both_path_finished = true_path_finished && false_path_finished;
+		if (both_path_finished) {
+			assert(post_branch_region_index.value == INVALID_INSTR_INDEX.value);
+		} else {
+			assert(post_branch_region_index.value != INVALID_INSTR_INDEX.value);
+		}
+
 		for (size_t i = 0; i < compiler->var_count; i += 1) {
 			if (compiler->vars[i] == NULL) {
 				continue;
@@ -3111,7 +3128,9 @@ static InstrIndex _compile_if_statement(FunctionCompiler* compiler,
 	instr_region_set_last(instr_buffer, region_instr_index, branch_instr_index);
 
 	profile_scope_end();
-	return post_branch_region_index;
+	return post_branch_region_index.value == INVALID_INSTR_INDEX.value
+		? region_instr_index
+		: post_branch_region_index;
 }
 
 static void _compile_statement(FunctionCompiler* compiler, AstNode* node) {
