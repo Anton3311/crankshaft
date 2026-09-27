@@ -2543,13 +2543,15 @@ static InstrIndex _compile_for_loop(FunctionCompiler* compiler,
 	
 	// Blocks that ends with a `continue`, first lead to the `advance_expr`.
 	InstrIndex advance_region = INVALID_INSTR_INDEX;
-	if (node->for_loop.advance_expr) {
+	bool advance_expr_reachable = !instr_region_finished(instr_buffer, body_block.final_region)
+		|| current_loop_switch_state.continue_count > 0;
+	if (node->for_loop.advance_expr && advance_expr_reachable) {
+		_compile_expr(compiler, node->for_loop.advance_expr);
+		advance_region = instr_new_region(instr_buffer, instr_allocator);
+
 		if (!instr_region_finished(instr_buffer, body_block.final_region)) {
 			// If the loop body already ends with a control instruction, whether it's break,
 			// continue or a return, the `advance_expr` won't be rechable any more.
-			_compile_expr(compiler, node->for_loop.advance_expr);
-
-			advance_region = instr_new_region(instr_buffer, instr_allocator);
 			InstrIndex jump_to_advance = instr_new_jump(instr_buffer,
 					instr_allocator,
 					advance_region,
@@ -2693,6 +2695,9 @@ static InstrIndex _compile_for_loop(FunctionCompiler* compiler,
 		assert(current_loop_switch_state.continue_count == 0);
 		assert(current_loop_switch_state.continue_capacity == 0);
 	} else {
+		bool has_continue = current_loop_switch_state.continue_count > 0;
+		assert(node->for_loop.advance_expr != NULL || has_continue);
+
 		_finish_regions_with_jumps(instr_buffer,
 				current_loop_switch_state.continue_regions,
 				current_loop_switch_state.continue_count,

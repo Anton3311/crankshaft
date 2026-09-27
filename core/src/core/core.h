@@ -822,7 +822,6 @@ size_t path_get_file_name_start(String path);
 // Returns 0 in case of error
 uint64_t path_get_last_write_time(String path, Arena* temp_allocator);
 
-#ifndef COMPILER_CRANKSHAFT
 inline String path_trim_trailing_slash(String path) {
 	size_t trimmed_path_length = path.length;
 	for (size_t i = path.length; i > 0; i -= 1) {
@@ -837,7 +836,6 @@ inline String path_trim_trailing_slash(String path) {
 
 	return sub_str(path, 0, trimmed_path_length);
 }
-#endif
 
 inline String path_get_file_name(String path) {
 	size_t file_name_start = path_get_file_name_start(path);
