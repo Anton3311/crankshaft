@@ -430,7 +430,7 @@ bool _parser_parse_pre_declaration_modifiers(Parser* parser,
 		Type* out_type,
 		bool duplicate_base_type);
 
-static AstNode* _parser_parse_single_node(Parser* parser, Token initial_token);
+static AstNode* _parser_parse_single_node(Parser* parser);
 
 typedef enum {
 	EXPR_PARSE_OK,
@@ -3985,7 +3985,7 @@ static AstNode* _parser_parse_if_stmt(Parser* parser) {
 		node->if_stmt.true_scope= arena_alloc_zeroed(parser->ast_allocator, Scope);
 		node->if_stmt.true_scope->id = parser->ident_storage->current_scope->id;
 
-		AstNode* true_node = _parser_parse_single_node(parser, true_node_token);
+		AstNode* true_node = _parser_parse_single_node(parser);
 		if (true_node) {
 			scope_append(node->if_stmt.true_scope, true_node);
 		} else {
@@ -4010,7 +4010,7 @@ static AstNode* _parser_parse_if_stmt(Parser* parser) {
 			node->if_stmt.false_scope = arena_alloc_zeroed(parser->ast_allocator, Scope);
 			node->if_stmt.false_scope->id = parser->ident_storage->current_scope->id;
 
-			AstNode* false_node = _parser_parse_single_node(parser, false_node_token);
+			AstNode* false_node = _parser_parse_single_node(parser);
 			if (false_node) {
 				scope_append(node->if_stmt.false_scope, false_node);
 			} else {
@@ -4051,7 +4051,7 @@ static LoopBody _parser_parse_loop_body(Parser* parser, AstNode* node) {
 	scope->id = parser->ident_storage->current_scope->id;
 
 	if (body_token.kind != TOKEN_SEMICOLON) {
-		body = _parser_parse_single_node(parser, body_token);
+		body = _parser_parse_single_node(parser);
 		scope_append(scope, body);
 	}
 
@@ -4209,7 +4209,7 @@ static AstNode* _parser_parse_for_loop(Parser* parser) {
 
 		if (init_stmt_token.kind != TOKEN_SEMICOLON) {
 			// FIXME: `_parser_parse_single_node` also consumes the `;`
-			AstNode* init_stmt = _parser_parse_single_node(parser, init_stmt_token);
+			AstNode* init_stmt = _parser_parse_single_node(parser);
 			loop->for_loop.init_stmt = init_stmt;
 			scope_append(scope, init_stmt);
 		} else {
@@ -4303,7 +4303,7 @@ static AstNode* _parser_parse_switch(Parser* parser) {
 		};
 		parser->loop_or_switch_state = &current_loop;
 
-		AstNode* body = _parser_parse_single_node(parser, body_token);
+		AstNode* body = _parser_parse_single_node(parser);
 		assert(body->kind == AST_NODE_BLOCK);
 
 		parser->loop_or_switch_state = parser->loop_or_switch_state->parent;
@@ -4371,7 +4371,8 @@ static AstNode* _parser_parse_default_case(Parser* parser) {
 	return node;
 }
 
-AstNode* _parser_parse_single_node(Parser* parser, Token initial_token) {
+AstNode* _parser_parse_single_node(Parser* parser) {
+	Token initial_token = preprocessor_view_next(parser->preprocessor);
 	switch (initial_token.kind) {
 	case TOKEN_LEFT_BRACE: {
 		AstNode* node = arena_alloc_zeroed(parser->ast_allocator, AstNode);
@@ -4585,7 +4586,7 @@ bool _parser_parse_scope(Parser* parser, Scope* out_scope) {
 			continue;
 		}
 
-		AstNode* node = _parser_parse_single_node(parser, token);
+		AstNode* node = _parser_parse_single_node(parser);
 		if (node) {
 			scope_append(out_scope, node);
 		} else {
@@ -4636,7 +4637,7 @@ void parser_parse(Parser* parser, AST* ast) {
 			continue;
 		}
 
-		AstNode* node = _parser_parse_single_node(parser, token);
+		AstNode* node = _parser_parse_single_node(parser);
 		if (node == parser->dummy_node) {
 			continue;
 		}
