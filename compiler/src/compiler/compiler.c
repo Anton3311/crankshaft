@@ -2788,11 +2788,84 @@ static InstrIndex _compile_do_while_loop(FunctionCompiler* compiler,
 	const Scope* body_scope = _loop_body_scope(node);
 	CompiledBlockRegions body_block = _compile_scope(compiler, node->while_loop.body_scope);
 
-	// 6. Link the `jump_to_first_iteration`
+	bool final_region_finished = instr_region_finished(instr_buffer, body_block.final_region);
+
+	// 6. Merge varaints from the last iteration and the regions ending with `continue`
+
+	{
+		size_t var_count = compiler->var_count;
+		InstrIndex* current_var_values = NULL;
+		InstrIndex* current_arg_values = NULL;
+
+		size_t snapshot_count = 1;
+		LoopValuesSnapshot var_snapshots[2] = {};
+		var_snapshots[0] = (LoopValuesSnapshot) {
+			.entries = current_loop_switch_state.continue_var_values,
+			.regions = current_loop_switch_state.continue_regions,
+			.count = current_loop_switch_state.continue_count,
+		};
+
+		LoopValuesSnapshot arg_snapshots[2] = {};
+		arg_snapshots[0] = (LoopValuesSnapshot) {
+			.entries = current_loop_switch_state.continue_arg_values,
+			.regions = current_loop_switch_state.continue_regions,
+			.count = current_loop_switch_state.continue_count,
+		};
+
+		if (!final_region_finished) {
+			snapshot_count = 2;
+
+			current_var_values = arena_alloc_array(compiler->temp_allocator,
+					InstrIndex,
+					var_count);
+			current_arg_values = arena_alloc_array(compiler->temp_allocator,
+					InstrIndex,
+					arg_count);
+
+			array_copy(current_var_values, compiler->var_values, var_count);
+			array_copy(current_arg_values, compiler->arg_states, arg_count);
+
+			var_snapshots[1] = (LoopValuesSnapshot) {
+				.entries = &current_var_values,
+				.regions = &body_block.final_region,
+				.count = 1,
+			};
+
+			arg_snapshots[1] = (LoopValuesSnapshot) {
+				.entries = &current_arg_values,
+				.regions = &body_block.final_region,
+				.count = 1,
+			};
+		}
+
+		assert(array_size(var_snapshots) == array_size(arg_snapshots));
+		assert(snapshot_count <= array_size(var_snapshots));
+
+		_reserve_phis(compiler, var_filter, compiler->var_values, compiler->var_values, var_count);
+		_reserve_phis(compiler, arg_filter, compiler->arg_states, compiler->arg_states, arg_count);
+
+		// Merge
+		_merge_variants(compiler,
+				compiler->var_values,
+				var_count,
+				var_snapshots,
+				snapshot_count,
+				var_filter,
+				false);
+		_merge_variants(compiler,
+				compiler->arg_states,
+				arg_count,
+				arg_snapshots,
+				snapshot_count,
+				arg_filter,
+				false);
+	}
+
+	// 7. Link the `jump_to_first_iteration`
 
 	instr_set_jump_target(instr_buffer, jump_to_first_iteration, body_block.initial_region);
 	
-	// 7. Compile the condition
+	// 8. Compile the condition
 
 	// NOTE: Here the condition should use variable values from within the loop body, not the ones
 	//       replaced with phis.
@@ -2800,7 +2873,6 @@ static InstrIndex _compile_do_while_loop(FunctionCompiler* compiler,
 	//       Replacement of empty phi variants is done later.
 
 	InstrIndex jump_to_condition;
-	bool final_region_finished = instr_region_finished(instr_buffer, body_block.final_region);
 	if (!final_region_finished) {
 		jump_to_condition = instr_new_jump(instr_buffer,
 				instr_allocator,
@@ -2826,11 +2898,10 @@ static InstrIndex _compile_do_while_loop(FunctionCompiler* compiler,
 
 	compiler->io_state = instr_new_io_state(instr_buffer, instr_allocator, INVALID_INSTR_INDEX);
 
-	// 7. Now merge values from before the loop, last iteration and blocks with either a `break` or
-	//    a `continue`
+	// 9. Now merge values from before the loop with values merged in step 6.
 
 	{
-		size_t snapshot_count = 3;
+		size_t snapshot_count = 2;
 		LoopValuesSnapshot var_snapshots[4] = {};
 		var_snapshots[0] = (LoopValuesSnapshot) {
 			.entries = &original_var_values,
@@ -2841,11 +2912,6 @@ static InstrIndex _compile_do_while_loop(FunctionCompiler* compiler,
 			.entries = current_loop_switch_state.break_var_values,
 			.regions = current_loop_switch_state.break_regions,
 			.count = current_loop_switch_state.break_count,
-		};
-		var_snapshots[2] = (LoopValuesSnapshot) {
-			.entries = current_loop_switch_state.continue_var_values,
-			.regions = current_loop_switch_state.continue_regions,
-			.count = current_loop_switch_state.continue_count,
 		};
 
 		LoopValuesSnapshot arg_snapshots[4] = {};
@@ -2859,22 +2925,17 @@ static InstrIndex _compile_do_while_loop(FunctionCompiler* compiler,
 			.regions = current_loop_switch_state.break_regions,
 			.count = current_loop_switch_state.break_count,
 		};
-		arg_snapshots[2] = (LoopValuesSnapshot) {
-			.entries = current_loop_switch_state.continue_arg_values,
-			.regions = current_loop_switch_state.continue_regions,
-			.count = current_loop_switch_state.continue_count,
-		};
+		
+		if (!final_region_finished || current_loop_switch_state.continue_count > 0) {
+			snapshot_count = 3;
 
-		if (!final_region_finished) {
-			snapshot_count = 4;
-
-			var_snapshots[3] = (LoopValuesSnapshot) {
+			var_snapshots[2] = (LoopValuesSnapshot) {
 				.entries = &compiler->var_values,
 				.regions = &condition_region,
 				.count = 1,
 			};
 
-			arg_snapshots[3] = (LoopValuesSnapshot) {
+			arg_snapshots[2] = (LoopValuesSnapshot) {
 				.entries = &compiler->arg_states,
 				.regions = &condition_region,
 				.count = 1,
@@ -2907,14 +2968,14 @@ static InstrIndex _compile_do_while_loop(FunctionCompiler* compiler,
 	compiler->var_values = original_var_values;
 	compiler->arg_states = original_arg_values;
 
-	// 9. post loop region
+	// 10. post loop region
 
 	InstrIndex post_loop_region = instr_new_region(instr_buffer, instr_allocator);
 
 	branch->branch.true_region = body_block.initial_region;
 	branch->branch.false_region = post_loop_region;
 
-	// Now fix the jumps inserted by `break` and `continue` statements.
+	// 11. Now fix the jumps inserted by `break` and `continue` statements.
 
 	// `break`:
 	_finish_regions_with_jumps(instr_buffer,
@@ -2926,11 +2987,11 @@ static InstrIndex _compile_do_while_loop(FunctionCompiler* compiler,
 	_finish_regions_with_jumps(instr_buffer,
 			current_loop_switch_state.continue_regions,
 			current_loop_switch_state.continue_count,
-			body_block.initial_region);
+			condition_region);
 
 	arena_end_temp(temp);
 
-	// Restore the previous loop state
+	// 12. Restore the previous loop state
 	_restore_loop_switch_state(compiler);
 
 	profile_scope_end();
