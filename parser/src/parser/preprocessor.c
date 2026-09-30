@@ -308,7 +308,9 @@ void preprocessor_init(Preprocessor* state,
 
 	state->include_stack.depth = 0;
 	state->include_stack.capacity = 32;
-	state->include_stack.includes = arena_alloc_array(state->allocator, Tokenizer, state->include_stack.capacity);
+	state->include_stack.includes = arena_alloc_array(state->allocator,
+			Tokenizer,
+			state->include_stack.capacity);
 	
 	state->include_history = (IncludeHistory) { .allocator = gpa };
 
@@ -474,7 +476,8 @@ void _macro_or_source_token_provider_init(Preprocessor* preprocessor,
 
 	if (s_macro_or_source_token_provider_vtable.next == NULL) {
 		s_macro_or_source_token_provider_vtable.next = _macro_or_source_token_provider_next;
-		s_macro_or_source_token_provider_vtable.view_next = _macro_or_source_token_provider_view_next;
+		s_macro_or_source_token_provider_vtable.view_next
+			= _macro_or_source_token_provider_view_next;
 	}
 
 	state->source_file = _preprocessor_current_file(preprocessor);
@@ -656,7 +659,8 @@ TokenArray _generate_directive_token_stream(Arena* allocator,
 	tokens.count = 0;
 
 	uint32_t current_line_index = initial_line_index;
-	SourceRange current_line_range  = line_info_get_line_range(&source_file->line_info, current_line_index);
+	SourceRange current_line_range = line_info_get_line_range(&source_file->line_info,
+			current_line_index);
 	current_line_range.source_file = source_file;
 
 	while (true) {
@@ -665,7 +669,8 @@ TokenArray _generate_directive_token_stream(Arena* allocator,
 			current_line_index += 1;
 			tokenizer_reset_to_token(tokenizer, token);
 
-			SourceRange source_range = line_info_get_line_range(&source_file->line_info, current_line_index);
+			SourceRange source_range = line_info_get_line_range(&source_file->line_info,
+					current_line_index);
 			current_line_range.start = source_range.start;
 			current_line_range.end = source_range.end;
 			continue;
@@ -1188,7 +1193,9 @@ Expr* _preprocessor_parse_expr_operand(Preprocessor* state,
 		}
 
 		return expr;
-	} else if (token.kind == TOKEN_EXCLAMATION_MARK || token.kind == TOKEN_MINUS || token.kind == TOKEN_PLUS) {
+	} else if (token.kind == TOKEN_EXCLAMATION_MARK
+			|| token.kind == TOKEN_MINUS
+			|| token.kind == TOKEN_PLUS) {
 		UnaryOp op = -1;
 		switch (token.kind) {
 		case TOKEN_EXCLAMATION_MARK:
@@ -1204,7 +1211,10 @@ Expr* _preprocessor_parse_expr_operand(Preprocessor* state,
 			unreachable();
 		}
 
-		Expr* operand = _preprocessor_parse_expr_operand(state, token_provider, allocator, expand_macro_calls);
+		Expr* operand = _preprocessor_parse_expr_operand(state,
+				token_provider,
+				allocator,
+				expand_macro_calls);
 		if (!operand) {
 			return NULL;
 		}
@@ -1252,7 +1262,10 @@ Expr* _preprocessor_parse_expr_operand(Preprocessor* state,
 				const MacroDefinition* macro = macro_table_find(&state->macro_table, token.string);
 				if (macro != NULL) {
 					_preprocessor_init_macro_call(state, token_provider, macro, token);
-					return _preprocessor_parse_expr_operand(state, token_provider, allocator, expand_macro_calls);
+					return _preprocessor_parse_expr_operand(state,
+							token_provider,
+							allocator,
+							expand_macro_calls);
 				}
 			}
 
@@ -1268,10 +1281,16 @@ Expr* _preprocessor_parse_expr_operand(Preprocessor* state,
 	return NULL;
 }
 
-Expr* _preprocessor_parse_expr(Preprocessor* state, TokenProvider token_provider, Arena* allocator, bool expand_macro_calls) {
+Expr* _preprocessor_parse_expr(Preprocessor* state,
+		TokenProvider token_provider,
+		Arena* allocator,
+		bool expand_macro_calls) {
 	profile_scope_start(__func__);
 
-	Expr* expr = _preprocessor_parse_expr_operand(state, token_provider, allocator, expand_macro_calls);
+	Expr* expr = _preprocessor_parse_expr_operand(state,
+			token_provider,
+			allocator,
+			expand_macro_calls);
 	Expr** current_expr = &expr;
 
 	while (true) {
@@ -1284,7 +1303,10 @@ Expr* _preprocessor_parse_expr(Preprocessor* state, TokenProvider token_provider
 			uint32_t current_op_precedence = bin_op_precedence(current_bin_op);
 			uint32_t next_op_precedence = UINT32_MAX;
 
-			Expr* right_operand = _preprocessor_parse_expr_operand(state, token_provider, allocator, expand_macro_calls);
+			Expr* right_operand = _preprocessor_parse_expr_operand(state,
+					token_provider,
+					allocator,
+					expand_macro_calls);
 
 			{
 				Token maybe_next_nin_op = token_provider_view_next(token_provider);
@@ -1407,7 +1429,8 @@ Expr* _expr_simplify(Preprocessor* state, Expr* expr) {
 		return expr;
 	case EXPR_OP_DEFINED: {
 		assert(expr->op_defined.macro->kind == EXPR_IDENT);
-		const MacroDefinition* macro = macro_table_find(&state->macro_table, expr->op_defined.macro->ident.string);
+		const MacroDefinition* macro = macro_table_find(&state->macro_table,
+				expr->op_defined.macro->ident.string);
 
 		uint64_t value = macro != NULL;
 		return _expr_to_int_literal(expr, value);
@@ -1484,7 +1507,10 @@ DirectiveKind _directive_kind_from_string(String string) {
 	return INVALID_DIRECTIVE;
 }
 
-static bool _preprocessor_parse_condition(Preprocessor* state, bool* out_result, ParsedDirective directive) {
+static bool _preprocessor_parse_condition(Preprocessor* state,
+		bool* out_result,
+		ParsedDirective directive) {
+
 	profile_scope_start(__func__);
 	ArenaRegion temp = arena_begin_temp(state->temp_allocator);
 
@@ -1492,7 +1518,8 @@ static bool _preprocessor_parse_condition(Preprocessor* state, bool* out_result,
 
 	{
 		const SourceFile* file = _preprocessor_current_file(state);
-		uint32_t line = line_info_pos_to_source_location(&file->line_info, directive.source_range.end).line;
+		uint32_t line = line_info_pos_to_source_location(&file->line_info,
+				directive.source_range.end).line;
 
 		TokenArray tokens = _generate_directive_token_stream(state->temp_allocator,
 				state->tokenizer,
@@ -1510,7 +1537,10 @@ static bool _preprocessor_parse_condition(Preprocessor* state, bool* out_result,
 
 	MacroOrSourceTokenProviderState token_provider_state = {};
 	TokenProvider token_provider = {};
-	_macro_or_source_token_provider_init(state, &token_provider, &token_provider_state, fallback_token_provider);
+	_macro_or_source_token_provider_init(state,
+			&token_provider,
+			&token_provider_state,
+			fallback_token_provider);
 
 	Expr* expr = _preprocessor_parse_expr(state, token_provider, state->temp_allocator, true);
 
@@ -1547,7 +1577,9 @@ inline bool _is_current_region_enabled(Preprocessor* state) {
 }
 
 inline bool _is_parent_region_enabled(Preprocessor* state) {
-	assert_msg(state->branch_stack_depth >= MIN_BRANCH_REGION_STACK_DEPTH + 1, "Root region doesn't have a parent");
+	assert_msg(state->branch_stack_depth >= MIN_BRANCH_REGION_STACK_DEPTH + 1,
+			"Root region doesn't have a parent");
+
 	return state->branch_stack[state->branch_stack_depth - 2].is_enabled;
 }
 
@@ -1565,7 +1597,9 @@ inline PreprocessorBranchRegion* _push_branch_region(Preprocessor* state) {
 }
 
 inline void _pop_branch_region(Preprocessor* state) {
-	assert_msg(state->branch_stack_depth > MIN_BRANCH_REGION_STACK_DEPTH, "Can't remove root region from the stack");
+	assert_msg(state->branch_stack_depth > MIN_BRANCH_REGION_STACK_DEPTH,
+			"Can't remove root region from the stack");
+
 	state->branch_stack_depth -= 1;
 }
 
@@ -1575,7 +1609,8 @@ bool _preprocessor_parse_directive(Preprocessor* state, ParsedDirective directiv
 	const SourceFile* source_file = _preprocessor_current_file(state);
 	const LineInfo* line_info = &source_file->line_info;
 
-	uint32_t directive_line = line_info_pos_to_source_location(line_info, directive.source_range.end).line + 1;
+	uint32_t directive_line = line_info_pos_to_source_location(line_info,
+			directive.source_range.end).line + 1;
 
 	switch (directive.kind) {
 	case DIRECTIVE_INCLUDE: {
@@ -1587,12 +1622,16 @@ bool _preprocessor_parse_directive(Preprocessor* state, ParsedDirective directiv
 
 		IncludeEvent include_event = {};
 		if (opening_quote == '<') {
-			StringTokenizerResult result = tokenizer_try_create_string_token(state->tokenizer, '<', '>', &string_token);
+			StringTokenizerResult result = tokenizer_try_create_string_token(state->tokenizer,
+					'<', '>', &string_token);
+
 			assert(result == STR_TOKEN_RESULT_NONE);
 
 			include_event.path_token = string_token;
 		} else if (opening_quote == '"') {
-			StringTokenizerResult result = tokenizer_try_create_string_token(state->tokenizer, '"', '"', &string_token);
+			StringTokenizerResult result = tokenizer_try_create_string_token(state->tokenizer,
+					'"', '"', &string_token);
+
 			assert(result == STR_TOKEN_RESULT_NONE);
 
 			include_event.path_token = string_token;
@@ -1627,13 +1666,17 @@ bool _preprocessor_parse_directive(Preprocessor* state, ParsedDirective directiv
 						NULL);
 
 #if PREPROCESSOR_LOG
-				debug_log_error("line: %u include %.*s failed", directive_line, STR_FMT(path_string));
+				debug_log_error("line: %u include %.*s failed",
+						directive_line,
+						STR_FMT(path_string));
 #endif
 				profile_scope_end();
 				return false;
 			}
 
-			const SourceFile* included_file = source_storage_find_file(state->source_storage, resolved_include_path);
+			const SourceFile* included_file = source_storage_find_file(state->source_storage,
+					resolved_include_path);
+
 			if (included_file == NULL) {
 				included_file = source_storage_append_from_path(state->source_storage,
 						resolved_include_path,
@@ -1657,7 +1700,9 @@ bool _preprocessor_parse_directive(Preprocessor* state, ParsedDirective directiv
 				}
 
 #if PREPROCESSOR_LOG
-				debug_log_info("line: %u include %.*s", directive_line, STR_FMT(included_file->path));
+				debug_log_info("line: %u include %.*s",
+						directive_line,
+						STR_FMT(included_file->path));
 #endif
 			}
 		}
@@ -1673,7 +1718,8 @@ bool _preprocessor_parse_directive(Preprocessor* state, ParsedDirective directiv
 		if (token.kind == TOKEN_IDENT && str_equal(token.string, STR_LIT("once"))) {
 			tokenizer_reset_to_token(state->tokenizer, token);
 
-			bool inserted = include_history_try_insert(&state->include_history, _preprocessor_current_file(state));
+			bool inserted = include_history_try_insert(&state->include_history,
+					_preprocessor_current_file(state));
 #if PREPROCESSOR_LOG
 			debug_log_info("inserted file in include history");
 #endif
@@ -1713,11 +1759,15 @@ bool _preprocessor_parse_directive(Preprocessor* state, ParsedDirective directiv
 			bool result = macro_table_remove(&state->macro_table, macro_name.string);
 			if (result) {
 #if PREPROCESSOR_LOG
-				debug_log_info("line: %u undef %.*s", directive_line, STR_FMT(macro_name.string));
+				debug_log_info("line: %u undef %.*s",
+						directive_line,
+						STR_FMT(macro_name.string));
 #endif
 			} else {
 #if PREPROCESSOR_LOG
-				debug_log_warn("line: %u undef %.*s failed", directive_line, STR_FMT(macro_name.string));
+				debug_log_warn("line: %u undef %.*s failed",
+						directive_line,
+						STR_FMT(macro_name.string));
 #endif
 			}
 		}
@@ -1738,7 +1788,9 @@ bool _preprocessor_parse_directive(Preprocessor* state, ParsedDirective directiv
 			branch_state->is_enabled = predicate;
 
 #if PREPROCESSOR_LOG
-			debug_log_info("line: %u if %s", directive_line, branch_state->is_enabled ? "taken" : "not taken");
+			debug_log_info("line: %u if %s",
+					directive_line,
+					branch_state->is_enabled ? "taken" : "not taken");
 #endif
 		} else {
 			_preprocessor_skip_until_newline(state);
@@ -1771,7 +1823,9 @@ bool _preprocessor_parse_directive(Preprocessor* state, ParsedDirective directiv
 			branch_state->is_enabled = predicate;
 
 #if PREPROCESSOR_LOG
-			debug_log_info("line: %u if %s", directive_line, branch_state->is_enabled ? "taken" : "not taken");
+			debug_log_info("line: %u if %s",
+					directive_line,
+					branch_state->is_enabled ? "taken" : "not taken");
 #endif
 		} else {
 			_preprocessor_skip_until_newline(state);
@@ -1818,7 +1872,9 @@ bool _preprocessor_parse_directive(Preprocessor* state, ParsedDirective directiv
 		if (_is_parent_region_enabled(state)) {
 			branch_state->is_enabled = !branch_state->alternative_branch_is_taken;
 #if PREPROCESSOR_LOG
-			debug_log_info("line: %u else %s", directive_line, branch_state->is_enabled ? "taken" : "not taken");
+			debug_log_info("line: %u else %s",
+					directive_line,
+					branch_state->is_enabled ? "taken" : "not taken");
 #endif
 		}
 
@@ -1873,7 +1929,9 @@ bool _preprocessor_parse_directive(Preprocessor* state, ParsedDirective directiv
 			branch_state->alternative_branch_is_taken |= is_taken;
 
 #if PREPROCESSOR_LOG
-			debug_log_info("line: %u elif %s", directive_line, branch_state->is_enabled ? "taken" : "not taken");
+			debug_log_info("line: %u elif %s",
+					directive_line,
+					branch_state->is_enabled ? "taken" : "not taken");
 #endif
 		} else {
 			_preprocessor_skip_until_newline(state);
@@ -1896,7 +1954,8 @@ bool _preprocessor_parse_directive(Preprocessor* state, ParsedDirective directiv
 		break;
 	}
 	case DIRECTIVE_ERROR: {
-		uint32_t initial_line = line_info_pos_to_source_location(line_info, directive.source_range.end).line;
+		uint32_t initial_line = line_info_pos_to_source_location(line_info,
+				directive.source_range.end).line;
 
 		Token first_token = { .kind = TOKEN_COUNT };
 		Token last_token = { .kind = TOKEN_COUNT };
@@ -1904,7 +1963,8 @@ bool _preprocessor_parse_directive(Preprocessor* state, ParsedDirective directiv
 		while (true) {
 			Token token = tokenizer_view_next(state->tokenizer);
 			
-			uint32_t token_line = line_info_pos_to_source_location(line_info, token.source_range.end).line;
+			uint32_t token_line = line_info_pos_to_source_location(line_info,
+					token.source_range.end).line;
 
 			if (token_line > initial_line) {
 				break;
@@ -2036,7 +2096,8 @@ void _preprocessor_skip_directive(Preprocessor* state) {
 // Macro call expansion state machine
 //
 
-// Merges subsequent tokens with `MACRO_TOKEN_HINT_TOKEN_INSERT_OPERATOR` hints into a single identifier token.
+// Merges subsequent tokens with `MACRO_TOKEN_HINT_TOKEN_INSERT_OPERATOR` hints into a single
+// identifier token.
 //
 // NOTE: Supports merging only if each of the macro arguments has exactly one token.
 bool _preprocessor_apply_token_insert_operator(Arena* generated_tokens_allocator,
@@ -2096,7 +2157,10 @@ inline bool _macro_call_finished(const MacroCall* call) {
 	return call->token_index == call->macro->token_count;
 }
 
-bool _preprocessor_expand_user_defined_macro(Arena* generated_tokens_allocator, Token* out_token, MacroCall* call) {
+bool _preprocessor_expand_user_defined_macro(Arena* generated_tokens_allocator,
+		Token* out_token,
+		MacroCall* call) {
+
 	profile_scope_start(__func__);
 	const MacroDefinition* macro = call->macro;
 
@@ -2160,7 +2224,8 @@ bool _preprocessor_expand_user_defined_macro(Arena* generated_tokens_allocator, 
 					.string = builder.string,
 				};
 
-				// We've precessed the string operator token => go to the next one in the token stream of the macro.
+				// We've precessed the string operator token => go to the next one in the token
+				// stream of the macro.
 				call->token_index += 1;
 
 				*out_token = token;
@@ -2363,7 +2428,9 @@ bool _preprocessor_get_next_macro_expansion_token(const SourceFile* source_file,
 
 		bool result;
 		if (call->macro->builtin_kind == BUILTIN_MACRO_NONE) {
-			result = _preprocessor_expand_user_defined_macro(generated_tokens_allocator, out_token, call);
+			result = _preprocessor_expand_user_defined_macro(generated_tokens_allocator,
+					out_token,
+					call);
 		} else {
 			result = _preprocessor_expand_builtin_macro(source_file,
 					macro_call_stack,
@@ -2400,7 +2467,8 @@ void _preprocessor_macro_call_to_diagnostics(const Preprocessor* state,
 		str_builder_append(&builder, macro->parameter_names[param_index]);
 		str_builder_append(&builder, STR_LIT(" = "));
 
-		for (size_t token_index = 0; token_index < call->argument_tokens[param_index].count; token_index += 1) {
+		size_t token_count = call->argument_tokens[param_index].count;
+		for (size_t token_index = 0; token_index < token_count; token_index += 1) {
 			Token token = call->argument_tokens[param_index].tokens[token_index];
 			str_builder_append(&builder, token.string);
 			str_builder_append_char(&builder, ' ');
@@ -2415,7 +2483,9 @@ void _preprocessor_macro_call_to_diagnostics(const Preprocessor* state,
 			root_error);
 }
 
-void _preprocessor_macro_call_stack_to_diagnostics(const Preprocessor* state, DiagnosticsEntry* root_error) {
+void _preprocessor_macro_call_stack_to_diagnostics(const Preprocessor* state,
+		DiagnosticsEntry* root_error) {
+
 	for (size_t call_index = 0; call_index < state->macro_call_stack.depth; call_index += 1) {
 		_preprocessor_macro_call_to_diagnostics(state, call_index, root_error);
 	}
@@ -2806,7 +2876,10 @@ Token preprocessor_next_token(Preprocessor* state) {
 
 			MacroOrSourceTokenProviderState token_provider_state = {};
 			TokenProvider token_provider = {};
-			_macro_or_source_token_provider_init(state, &token_provider, &token_provider_state, fallback_token_provider);
+			_macro_or_source_token_provider_init(state,
+					&token_provider,
+					&token_provider_state,
+					fallback_token_provider);
 			_preprocessor_init_macro_call(state, token_provider, macro, next_token);
 
 			// NOTE: Possible cases:
