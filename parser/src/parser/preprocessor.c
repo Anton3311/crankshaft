@@ -2168,8 +2168,11 @@ bool _preprocessor_expand_user_defined_macro(Arena* generated_tokens_allocator, 
 				return true;
 			}
 			case MACRO_TOKEN_HINT_TOKEN_INSERT_OPERATOR:
+				bool result = _preprocessor_apply_token_insert_operator(generated_tokens_allocator,
+						call,
+						out_token);
 				profile_scope_end();
-				return _preprocessor_apply_token_insert_operator(generated_tokens_allocator, call, out_token);
+				return result;
 			case MACRO_TOKEN_HINT_VA_ARGS:
 				call->state = MACRO_CALL_VA_ARGS_EXPANSION;
 				call->va_args_expansion = (MacroCallVaArgsExpansion) {
