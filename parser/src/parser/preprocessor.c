@@ -2429,8 +2429,11 @@ typedef struct {
 //
 
 typedef enum {
+	// This was the last argument
 	PARSE_MACRO_ARG_END,
 	PARSE_MACRO_ARG_EOF,
+
+	// We hit a `,` and expect one more argument
 	PARSE_MACRO_ARG_EXPECT_ONE_MORE,
 } ParseMacroArgResult;
 
@@ -2482,8 +2485,8 @@ ParseMacroArgResult _preprocessor_parse_single_macro_call_arg(TokenProvider toke
 				match = token.kind == TOKEN_RIGHT_BRACE;
 				break;
 			default:
-				unreachable_msg("Some other token type which is not a paren, square bracket nor a curly brace"
-						"was pushed onto the stack");
+				unreachable_msg("Some other token type which is not a paren, square bracket nor a "
+						" curly brace was pushed onto the stack");
 			}
 
 			if (match) {
@@ -2536,28 +2539,23 @@ bool _preprocessor_parse_macro_call_args(Diagnostics* diagnostics,
 	TokenArray* token_streams = arena_alloc_array(temp_allocator, TokenArray, 0);
 	size_t token_stream_count = 0;
 
-	TokenArray current_token_stream = {};
-	current_token_stream.tokens = arena_alloc_array(allocator, Token, 0);
-
-	bool arg_is_expected = false;
 	bool has_reached_end = false;
 	while (!has_reached_end) {
+		TokenArray current_token_stream = {};
+		current_token_stream.tokens = arena_alloc_array(allocator, Token, 0);
+		current_token_stream.count = 0;
+
 		ParseMacroArgResult result = _preprocessor_parse_single_macro_call_arg(token_provider,
 				allocator,
 				&current_token_stream);
 
-		if (result == PARSE_MACRO_ARG_END || result == PARSE_MACRO_ARG_EXPECT_ONE_MORE) {
+		bool accept_stream = result == PARSE_MACRO_ARG_EXPECT_ONE_MORE
+			|| (result == PARSE_MACRO_ARG_END && current_token_stream.count > 0);
+
+		if (accept_stream) {
 			arena_alloc(temp_allocator, TokenArray);
-
-			if (current_token_stream.count > 0 || arg_is_expected) {
-				token_streams[token_stream_count] = current_token_stream;
-				token_stream_count += 1;
-			}
-
-			arg_is_expected = false;
-
-			current_token_stream.count = 0;
-			current_token_stream.tokens = arena_alloc_array(allocator, Token, 0);
+			token_streams[token_stream_count] = current_token_stream;
+			token_stream_count += 1;
 		}
 
 		switch (result) {
@@ -2567,7 +2565,6 @@ bool _preprocessor_parse_macro_call_args(Diagnostics* diagnostics,
 			profile_scope_end();
 			return false;
 		case PARSE_MACRO_ARG_EXPECT_ONE_MORE:
-			arg_is_expected = true;
 			break;
 		case PARSE_MACRO_ARG_END:
 			has_reached_end = true;
@@ -2579,7 +2576,7 @@ bool _preprocessor_parse_macro_call_args(Diagnostics* diagnostics,
 	out_args->source_range = source_range;
 	out_args->count = token_stream_count;
 	out_args->token_streams = arena_alloc_array(allocator, TokenArray, token_stream_count);
-	memcpy(out_args->token_streams, token_streams, sizeof(*token_streams) * token_stream_count);
+	array_copy(out_args->token_streams, token_streams, token_stream_count);
 
 	arena_end_temp(args_region);
 	profile_scope_end();
