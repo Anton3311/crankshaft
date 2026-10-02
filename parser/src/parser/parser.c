@@ -56,40 +56,39 @@ static size_t _ident_storage_try_find_entry(IdentifierNamespace* ident_namespace
 	return SIZE_MAX;
 }
 
-static size_t _ident_storage_try_find_empty_entry(IdentifierNamespace* ident_namespace, String name) {
-	profile_func_colored(PROFILE_COLOR);
-	assert(ident_namespace != NULL);
-	assert(name.length > 0);
+inline static size_t _ident_storage_try_find_empty_entry(IdentifierNamespace* ident_namespace,
+		String name) {
 
-	size_t entry_index = hash_string(name) % ident_namespace->capacity;
+	size_t capacity = ident_namespace->capacity;
+	String* keys = ident_namespace->keys;
+
+	size_t entry_index = hash_string(name) % capacity;
 	while (true) {
-		String key = ident_namespace->keys[entry_index];
+		String key = keys[entry_index];
 		if (key.v == NULL || key.v == REMOVED_SLOT_FLAG) {
-			profile_scope_end();
 			return entry_index;
 		}
 
-		entry_index = (entry_index + 1) % ident_namespace->capacity;
+		entry_index = (entry_index + 1) % capacity;
 	}
 
-	profile_scope_end();
 	return SIZE_MAX;
 }
 
-inline void _ident_storage_alloc_namespace_hash_map(IdentifierNamespace* ident_namespace, Allocator allocator) {
-	profile_func_colored(PROFILE_COLOR);
+inline static void _ident_storage_alloc_namespace_hash_map(IdentifierNamespace* ident_namespace,
+		Allocator allocator) {
 
-	size_t key_size = sizeof(String);
-	size_t entry_size = sizeof(IdentifierEntry*);
+	size_t key_size = sizeof(*ident_namespace->keys);
+	size_t entry_size = sizeof(*ident_namespace->entries);
 	size_t buffer_size = (key_size + entry_size) * ident_namespace->capacity;
 	uint8_t* new_buffer = allocator_alloc_array(allocator, uint8_t, buffer_size);
 
-	memset(new_buffer, 0, buffer_size);
+	size_t entries_offset = key_size * ident_namespace->capacity;
 
 	ident_namespace->keys = (String*)new_buffer;
-	ident_namespace->entries = (IdentifierEntry**)(new_buffer + key_size * ident_namespace->capacity);
+	ident_namespace->entries = (IdentifierEntry**)(new_buffer + entries_offset);
 
-	profile_scope_end();
+	memset(ident_namespace->keys, 0, key_size * ident_namespace->capacity);
 }
 
 static void _ident_storage_grow_namespace(IdentifierNamespace* ident_namespace, Allocator allocator) {
