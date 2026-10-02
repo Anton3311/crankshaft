@@ -4069,7 +4069,9 @@ static LoopBody _parser_parse_loop_body(Parser* parser, AstNode* node) {
 
 	if (body_token.kind != TOKEN_SEMICOLON) {
 		body = _parser_parse_single_node(parser);
-		scope_append(scope, body);
+		if (body) {
+			scope_append(scope, body);
+		}
 	}
 
 	ident_storage_end_scope(parser->ident_storage);
@@ -4228,7 +4230,10 @@ static AstNode* _parser_parse_for_loop(Parser* parser) {
 			// FIXME: `_parser_parse_single_node` also consumes the `;`
 			AstNode* init_stmt = _parser_parse_single_node(parser);
 			loop->for_loop.init_stmt = init_stmt;
-			scope_append(scope, init_stmt);
+
+			if (init_stmt) {
+				scope_append(scope, init_stmt);
+			}
 		} else {
 			_parser_consume_semicolon(parser);
 		}
@@ -4321,11 +4326,12 @@ static AstNode* _parser_parse_switch(Parser* parser) {
 		parser->loop_or_switch_state = &current_loop;
 
 		AstNode* body = _parser_parse_single_node(parser);
-		assert(body->kind == AST_NODE_BLOCK);
+		if (body) {
+			assert(body->kind == AST_NODE_BLOCK);
+			node->switch_stmt.body = &body->block;
+		}
 
 		parser->loop_or_switch_state = parser->loop_or_switch_state->parent;
-
-		node->switch_stmt.body = &body->block;
 	} else {
 		node->switch_stmt.body = arena_alloc_zeroed(parser->ast_allocator, Scope);
 	}
