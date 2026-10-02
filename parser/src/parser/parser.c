@@ -1485,59 +1485,77 @@ AstNode* _parser_parse_type_def(Parser* parser) {
 	Token keyword_token = preprocessor_next_token(parser->preprocessor);
 	assert(keyword_token.kind == TOKEN_KEYWORD_TYPEDEF);
 
+	TypeDef* type_def = arena_alloc(parser->ast_allocator, TypeDef);
+
 	Type aliased_type = {};
-	Declarator declarator = {};
 	if (!_parser_parse_type(parser, &aliased_type, false)) {
 		_parser_skip_until_semicolon(parser);
 		profile_scope_end();
 		return parser->dummy_node;
-	} else if (!_parser_parse_declarator(parser, &aliased_type, &declarator, false)) {
-		_parser_skip_until_semicolon(parser);
-		profile_scope_end();
-		return parser->dummy_node;
 	}
 
-	Token semicolon = preprocessor_next_token(parser->preprocessor);
-	if (semicolon.kind != TOKEN_SEMICOLON) {
-		TokenKind expected_tokens[] = {
-			TOKEN_SEMICOLON,
-		};
-
-		diagnostics_report_unexpected_token(parser->diagnostics,
-				semicolon,
-				expected_tokens,
-				array_size(expected_tokens));
-		profile_scope_end();
-		return NULL;
-	}
-
-	TypeDef* type_def = arena_alloc(parser->ast_allocator, TypeDef);
-	memset(type_def, 0, sizeof(*type_def));
-	
-	type_def->new_name = declarator.name;
-	type_def->new_name_source_range = declarator.name_source_range;
-	type_def->aliased_type = declarator.type;
-
-	if (type_def->new_name.length > 0) {
-		IdentifierEntry* entry = ident_storage_find(parser->ident_storage,
-				IDENT_NAMESPACE_ALIAS,
-				IDENT_FIND_DEFAULT,
-				type_def->new_name);
-
-		if (!entry) {
-			entry = ident_storage_insert(parser->ident_storage,
-					IDENT_NAMESPACE_ALIAS,
-					IDENT_TYPE_DEF,
-					type_def->new_name,
-					type_def->new_name_source_range);
+	while (true) {
+		Declarator declarator = {};
+		if (!_parser_parse_declarator(parser, &aliased_type, &declarator, false)) {
+			_parser_skip_until_semicolon(parser);
+			profile_scope_end();
+			return parser->dummy_node;
 		}
 
-		entry->type_def = type_def;
-	} else {
-		report_error(parser->diagnostics,
-				source_range_pack(keyword_token.source_range),
-				STR_LIT("typedef requires a name"),
-				NULL);
+		TypeDefVariant* variant = arena_alloc_zeroed(parser->ast_allocator, TypeDefVariant);
+		variant->new_name = declarator.name;
+		variant->new_name_source_range = declarator.name_source_range;
+		variant->aliased_type = declarator.type;
+		variant->parent = type_def;
+
+		if (type_def->first_variant == NULL) {
+			type_def->first_variant = variant;
+			type_def->last_variant = variant;
+		} else {
+			type_def->last_variant->next = variant;
+			type_def->last_variant = variant;
+		}
+
+		if (variant->new_name.length > 0) {
+			IdentifierEntry* entry = ident_storage_find(parser->ident_storage,
+					IDENT_NAMESPACE_ALIAS,
+					IDENT_FIND_DEFAULT,
+					variant->new_name);
+
+			if (!entry) {
+				entry = ident_storage_insert(parser->ident_storage,
+						IDENT_NAMESPACE_ALIAS,
+						IDENT_TYPE_DEF,
+						variant->new_name,
+						variant->new_name_source_range);
+			}
+
+			entry->type_def = variant;
+		} else {
+			report_error(parser->diagnostics,
+					source_range_pack(keyword_token.source_range),
+					STR_LIT("typedef requires a name"),
+					NULL);
+		}
+
+		Token semicolon_or_comma = preprocessor_next_token(parser->preprocessor);
+		if (semicolon_or_comma.kind == TOKEN_SEMICOLON) {
+			break;
+		} else if (semicolon_or_comma.kind == TOKEN_COMMA) {
+			continue;
+		} else {
+			TokenKind expected_tokens[] = {
+				TOKEN_SEMICOLON,
+				TOKEN_COMMA,
+			};
+
+			diagnostics_report_unexpected_token(parser->diagnostics,
+					semicolon_or_comma,
+					expected_tokens,
+					array_size(expected_tokens));
+			profile_scope_end();
+			return NULL;
+		}
 	}
 
 	AstNode* node = arena_alloc_zeroed(parser->ast_allocator, AstNode);

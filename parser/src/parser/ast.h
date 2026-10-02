@@ -15,6 +15,7 @@ typedef struct StructFieldNamespaceEntry StructFieldNamespaceEntry;
 typedef struct Enum Enum;
 typedef struct EnumVariant EnumVariant;
 typedef struct TypeDef TypeDef;
+typedef struct TypeDefVariant TypeDefVariant;
 typedef struct Function Function;
 typedef struct FunctionPrototype FunctionPrototype;
 typedef struct FunctionParam FunctionParam;
@@ -160,7 +161,7 @@ struct Type {
 	TypeKind kind;
 
 	TypeQualifiers qualifiers;
-	TypeDef* alias_definition;
+	TypeDefVariant* alias_definition;
 
 	union {
 		Struct* struct_def;
@@ -613,9 +614,16 @@ struct Enum {
 //
 
 struct TypeDef {
+	TypeDefVariant* first_variant;
+	TypeDefVariant* last_variant;
+};
+
+struct TypeDefVariant {
 	Type aliased_type;
 	String new_name;
 	PackedSourceRange new_name_source_range;
+	TypeDefVariant* next;
+	TypeDef* parent;
 };
 
 //

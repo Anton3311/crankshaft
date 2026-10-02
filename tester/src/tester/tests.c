@@ -864,8 +864,10 @@ void test_parse_type_def_of_primitive_type(TestContext* context) {
 	assert(first->kind == AST_NODE_TYPE_DEF);
 
 	TypeDef* type_def = first->type_def;
-	assert(type_def->aliased_type.kind == TYPE_INT);
-	assert(str_equal(type_def->new_name, STR_LIT("int32")));
+	assert(type_def->first_variant);
+	assert(type_def->first_variant == type_def->last_variant);
+	assert(type_def->first_variant->aliased_type.kind == TYPE_INT);
+	assert(str_equal(type_def->first_variant->new_name, STR_LIT("int32")));
 }
 
 void test_parse_type_def_of_struct_def(TestContext* context) {
@@ -881,13 +883,14 @@ void test_parse_type_def_of_struct_def(TestContext* context) {
 	assert(first->kind == AST_NODE_TYPE_DEF);
 
 	TypeDef* type_def = first->type_def;
-	assert(type_def->aliased_type.kind == TYPE_STRUCT);
+	assert(type_def->first_variant);
+	assert(type_def->first_variant->aliased_type.kind == TYPE_STRUCT);
 
-	Struct* struct_def = type_def->aliased_type.struct_def;
+	Struct* struct_def = type_def->first_variant->aliased_type.struct_def;
 	assert(str_equal(struct_def->name, STR_LIT("Hello")));
 	assert(struct_def->field_count == 0);
 
-	assert(str_equal(type_def->new_name, STR_LIT("World")));
+	assert(str_equal(type_def->first_variant->new_name, STR_LIT("World")));
 }
 
 void test_parse_type_def_of_struct_def_with_fields(TestContext* context) {
@@ -907,10 +910,11 @@ void test_parse_type_def_of_struct_def_with_fields(TestContext* context) {
 	assert(first->kind == AST_NODE_TYPE_DEF);
 
 	TypeDef* type_def = first->type_def;
-	assert(type_def->aliased_type.kind == TYPE_STRUCT);
-	assert(str_equal(type_def->new_name, STR_LIT("World")));
+	assert(type_def->first_variant);
+	assert(type_def->first_variant->aliased_type.kind == TYPE_STRUCT);
+	assert(str_equal(type_def->first_variant->new_name, STR_LIT("World")));
 
-	Struct* hello_struct_def = type_def->aliased_type.struct_def;
+	Struct* hello_struct_def = type_def->first_variant->aliased_type.struct_def;
 	assert(str_equal(hello_struct_def->name, STR_LIT("Hello")));
 	assert(hello_struct_def->field_count == 3);
 
@@ -951,7 +955,7 @@ void test_aliased_type_resolution(TestContext* context) {
 	assert(type_def_node->kind == AST_NODE_TYPE_DEF);
 	assert(var_node->kind == AST_NODE_VARIABLE);
 
-	assert(var_node->variable.type.alias_definition == type_def_node->type_def);
+	assert(var_node->variable.type.alias_definition == type_def_node->type_def->first_variant);
 }
 
 void test_parse_enum_def(TestContext* context) {

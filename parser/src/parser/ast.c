@@ -1440,7 +1440,7 @@ void print_type(PrinterState* printer, const Type* type) {
 	}
 }
 
-void print_type_def(PrinterState* printer, const TypeDef* type_def) {
+void print_type_def_variant(PrinterState* printer, const TypeDefVariant* type_def) {
 	printer_begin_struct(printer, "typedef");
 
 	printer_field(printer, "type");
@@ -1562,7 +1562,11 @@ void print_return_stmt(PrinterState* printer, const ReturnStmt* return_stmt) {
 void print_single_node(PrinterState* printer, const AstNode* node) {
 	switch (node->kind) {
 	case AST_NODE_TYPE_DEF:
-		print_type_def(printer, node->type_def);
+		for (TypeDefVariant* variant = node->type_def->first_variant;
+				variant != NULL;
+				variant = variant->next) {
+			print_type_def_variant(printer, variant);
+		}
 		break;
 	case AST_NODE_STRUCT:
 		print_struct_def(printer, node->struct_def);

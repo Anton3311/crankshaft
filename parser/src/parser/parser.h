@@ -68,7 +68,7 @@ struct IdentifierEntry {
 		Struct* struct_def;
 		Struct* union_def;
 		Enum* enum_def;
-		TypeDef* type_def;
+		TypeDefVariant* type_def;
 		Function* function_def;
 		Variable* variable;
 
