@@ -2826,7 +2826,7 @@ Token preprocessor_next_token(Preprocessor* state) {
 				profile_scope_end();
 				return token;
 			default:
-				tokenizer_reset_to_token(state->tokenizer, token);
+				_preprocessor_skip_until_newline(state);
 			}
 
 			continue;
