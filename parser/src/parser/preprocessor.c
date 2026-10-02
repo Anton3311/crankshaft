@@ -1070,6 +1070,9 @@ typedef enum {
 	BIN_OP_BITWISE_OR,
 	BIN_OP_BITWISE_XOR,
 
+	BIN_OP_BITWISE_SHIFT_LEFT,
+	BIN_OP_BITWISE_SHIFT_RIGHT,
+
 	BIN_OP_COUNT,
 } BinOpKind;
 
@@ -1142,6 +1145,11 @@ static BinOpKind _token_kind_to_bin_op(TokenKind kind) {
 	case TOKEN_BITWISE_XOR:
 		return BIN_OP_BITWISE_XOR;
 	
+	case TOKEN_BITWISE_SHIFT_LEFT:
+		return BIN_OP_BITWISE_SHIFT_LEFT;
+	case TOKEN_BITWISE_SHIFT_RIGHT:
+		return BIN_OP_BITWISE_SHIFT_RIGHT;
+	
 	default:
 		return BIN_OP_COUNT;
 	}
@@ -1152,6 +1160,9 @@ static BinOpKind _token_kind_to_bin_op(TokenKind kind) {
 
 static uint32_t bin_op_precedence(BinOpKind op) {
 	switch (op) {
+	case BIN_OP_BITWISE_SHIFT_LEFT:
+	case BIN_OP_BITWISE_SHIFT_RIGHT:
+		return 5;
 	case BIN_OP_LESS:
 	case BIN_OP_GREATER:
 	case BIN_OP_LESS_OR_EQUAL:
@@ -1418,6 +1429,10 @@ Expr* _expr_simplify(Preprocessor* state, Expr* expr) {
 			return _expr_to_int_literal(expr, left_value | right_value);
 		case BIN_OP_BITWISE_XOR:
 			return _expr_to_int_literal(expr, left_value ^ right_value);
+		case BIN_OP_BITWISE_SHIFT_LEFT:
+			return _expr_to_int_literal(expr, left_value << right_value);
+		case BIN_OP_BITWISE_SHIFT_RIGHT:
+			return _expr_to_int_literal(expr, left_value >> right_value);
 
 		case BIN_OP_COUNT:
 			unreachable();
