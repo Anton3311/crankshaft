@@ -6,40 +6,48 @@
 
 #define PREPROCESSOR_LOG 0
 
-static size_t _macro_table_find_empty_slot(MacroTable* table, String key) {
-	profile_scope_start(__func__);
+inline static size_t _macro_table_find_empty_slot(MacroTable* table, String key) {
+	size_t capacity = table->capacity;
+	String* keys = table->keys;
 
 	size_t hash = hash_string(key);
-	for (size_t i = 0; i < table->capacity; i += 1) {
-		size_t index = (hash + i) % table->capacity;
-		String macro_name = table->macros[index].name;
+	for (size_t i = 0; i < capacity; i += 1) {
+		size_t index = (hash + i) % capacity;
+		String macro_name = keys[index];
 
 		if (macro_name.v == NULL || macro_name.v == REMOVED_MACRO_FLAG) {
-			profile_scope_end();
 			return index;
 		}
 	}
 
-	profile_scope_end();
 	return SIZE_MAX;
 }
 
 static void _macro_table_grow(MacroTable* table) {
 	profile_scope_start(__func__);
 	size_t new_capacity = max(MACRO_TABLE_INITIAL_CAPACITY, table->capacity * 2);
-
+	
+	String* old_keys = table->keys;
 	MacroDefinition* old_macros = table->macros;
 	size_t old_capactiy = table->capacity;
 
-	table->macros = allocator_alloc_array(table->allocator,
-			MacroDefinition,
-			new_capacity);
+	assert(alignof(String) == alignof(MacroDefinition));
+	size_t alignment = alignof(String);
+
+	size_t buffer_size = (sizeof(*old_keys) + sizeof(*old_macros)) * new_capacity;
+	uint8_t* buffer = allocator_alloc_bytes(table->allocator, buffer_size, alignment);
+
+	String* new_keys = (String*)buffer;
+	MacroDefinition* new_macros = (MacroDefinition*)(buffer + sizeof(*old_keys) * new_capacity);
+
+	table->keys = new_keys;
+	table->macros = new_macros;
 	table->capacity = new_capacity;
 
-	memset(table->macros, 0, new_capacity * sizeof(*table->macros));
+	memset(table->keys, 0, new_capacity * sizeof(*table->keys));
 
 	for (size_t i = 0; i < old_capactiy; i += 1) {
-		String key = old_macros[i].name;
+		String key = old_keys[i];
 		if (key.v == NULL || key.v == REMOVED_MACRO_FLAG ) {
 			continue;
 		}
@@ -47,6 +55,7 @@ static void _macro_table_grow(MacroTable* table) {
 		size_t empty_slot = _macro_table_find_empty_slot(table, key);
 		assert(empty_slot != SIZE_MAX);
 
+		table->keys[empty_slot] = key;
 		table->macros[empty_slot] = old_macros[i];
 	}
 
@@ -62,6 +71,7 @@ void macro_table_append(MacroTable* table, const MacroDefinition* macro) {
 	size_t slot = _macro_table_find_empty_slot(table, macro->name);
 	assert(slot != SIZE_MAX);
 
+	table->keys[slot] = macro->name;
 	table->macros[slot] = *macro;
 	table->count += 1;
 
@@ -71,16 +81,19 @@ void macro_table_append(MacroTable* table, const MacroDefinition* macro) {
 bool macro_table_remove(MacroTable* table, String name) {
 	profile_scope_start(__func__);
 
+	String* keys = table->keys;
+	size_t capacity = table->capacity;
+
 	size_t hash = hash_string(name);
 	for (size_t i = 0; i < table->capacity; i += 1) {
-		size_t index = (hash + i) % table->capacity;
-		String macro_name = table->macros[index].name;
+		size_t index = (hash + i) % capacity;
+		String key = keys[index];
 
-		if (macro_name.v == NULL || macro_name.v == REMOVED_MACRO_FLAG) {
+		if (key.v == NULL || key.v == REMOVED_MACRO_FLAG) {
 			profile_scope_end();
 			return false;
-		} else if (str_equal(macro_name, name)) {
-			table->macros[index].name.v = REMOVED_MACRO_FLAG;
+		} else if (str_equal(key, name)) {
+			keys[index].v = REMOVED_MACRO_FLAG;
 			profile_scope_end();
 			return true;
 		}
@@ -93,10 +106,13 @@ bool macro_table_remove(MacroTable* table, String name) {
 const MacroDefinition* macro_table_find(const MacroTable* table, String name) {
 	profile_scope_start(__func__);
 
+	String* keys = table->keys;
+	size_t capacity = table->capacity;
+
 	size_t hash = hash_string(name);
-	for (size_t i = 0; i < table->capacity; i += 1) {
-		size_t index = (hash + i) % table->capacity;
-		String macro_name = table->macros[index].name;
+	for (size_t i = 0; i < capacity; i += 1) {
+		size_t index = (hash + i) % capacity;
+		String macro_name = keys[index];
 
 		if (macro_name.v == NULL || macro_name.v == REMOVED_MACRO_FLAG) {
 			profile_scope_end();
@@ -403,7 +419,7 @@ void preprocessor_release(Preprocessor* state) {
 	MacroTable* table = &state->macro_table;
 	if (table->count > 0) {
 		assert(table->macros);
-		allocator_release(table->allocator, table->macros);
+		allocator_release(table->allocator, table->keys);
 	} else {
 		assert(table->macros == NULL);
 	}

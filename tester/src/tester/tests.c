@@ -217,7 +217,7 @@ static void init_preprocessor_test(TestContext* context,
 	Arena* macros_allocator = arena_alloc(context->arena, Arena);
 	*macros_allocator = arena_alloc_sub_arena(
 			context->arena,
-			sizeof(MacroDefinition) * MACRO_TABLE_INITIAL_CAPACITY);
+			(sizeof(MacroDefinition) + sizeof(String)) * MACRO_TABLE_INITIAL_CAPACITY);
 
 	*out_diagnostics = (Diagnostics) {
 		.allocator = context->arena,

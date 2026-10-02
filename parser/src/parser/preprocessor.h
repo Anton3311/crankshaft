@@ -16,6 +16,7 @@ typedef struct {
 	size_t capacity;
 	size_t count;
 
+	String* keys;
 	MacroDefinition* macros;
 } MacroTable;
 
