@@ -570,6 +570,17 @@ static bool _parser_parse_struct_fields(Parser* parser,
 			_parser_skip_until(parser, TOKEN_SEMICOLON, TOKEN_RIGHT_BRACE);
 		} else if (!_parser_parse_declarator(parser, &field_type, &field_declarator, false)) {
 			_parser_skip_until(parser, TOKEN_SEMICOLON, TOKEN_RIGHT_BRACE);
+		} else {
+			assert(field_declarator.type.kind == TYPE_VOID);
+		}
+
+		if (field_type.kind == TYPE_VOID) {
+			// TODO: Need a surce range of the type. Declarator parsing might fail, and using it's
+			//       source range will be invalid
+			report_error(parser->diagnostics,
+					field_declarator.name_source_range,
+					STR_LIT("Fields of type `void` are not allowed"),
+					NULL);
 		}
 
 		StructField* field = arena_alloc_zeroed(parser->temp_allocator, StructField);
@@ -765,6 +776,10 @@ bool _parser_parse_struct_def(Parser* parser, Struct** out_struct_def, bool is_a
 			for (size_t i = 0; i < field_count; i += 1) {
 				const Type* field_type = &fields[i].type;
 				TypeLayout field_type_layout = type_get_layout(parser->type_context, field_type);
+
+				if (field_type->kind == TYPE_VOID) {
+					continue;
+				}
 
 				assert(field_type_layout.size > 0);
 				assert(field_type_layout.alignment > 0);
