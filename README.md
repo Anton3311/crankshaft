@@ -3,15 +3,17 @@
 </h1>
 
 <p aling="center">
-    <a href="docs/architecture.md">Architecture</a>
-    ·
-    <a href="#how-to-build">Building</a>
-    ·
-    <a href="docs/design.md">Design</a>
-    ·
-    <a href="docs">Docs</a>
-    ·
-    <a href="#running-tests">Testing</a>
+    <p align="center">
+        <a href="docs/architecture.md">Architecture</a>
+        ·
+        <a href="#how-to-build">Building</a>
+        ·
+        <a href="docs/design.md">Design</a>
+        ·
+        <a href="docs">Docs</a>
+        ·
+        <a href="#running-tests">Testing</a>
+    </p>
 </p>
 
 # About
