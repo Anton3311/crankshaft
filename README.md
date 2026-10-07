@@ -1,18 +1,26 @@
-# Table of Contents
+<h1>
+    <p align="center">Crankshaft</p>
+</h1>
 
-1. [About](#about)
-1. [Project Structure](#project-structure)
-1. [How to build](#how-to-build)
-1. [Running the compiler](#running-the-compiler)
-1. [Running tests](#running-tests)
-1. [About the Preprocessor](docs/preprocessor.md)
-1. [About the Compiler](docs/compiler.md)
+<p aling="center">
+    <a href="docs/architecture.md">Architecture</a>
+    ·
+    <a href="#how-to-build">Building</a>
+    ·
+    <a href="docs/design.md">Design</a>
+    ·
+    <a href="docs">Docs</a>
+    ·
+    <a href="#running-tests">Testing</a>
+</p>
 
 # About
 
-This is a compiler for a subset of C99, written fully in C.
+`Crankshaft` is a compiler for a subset of C99 with a custom Sea of Nodes Intermediate Representation and a custom x64 backend.
 
-It implements a preprocessor, a parser, a compiler, a sea of nodes backend with a custom linker and it outputs x64 machine.
+Written fully in C with only dependecies being `Tracy` profiler and a C compiler.
+
+`Crankshaft` is already in a state, where it is capable of self-hosting parts of itself. For now is only the tokenizer (`parser/src/parser/tokenizer.c`), see the test `tester/src/tester/self_hosting/self_hosted_tokenizer_driver.c`.
 
 > [!IMPORTANT]
 > Not fully standard complient
@@ -22,22 +30,12 @@ It implements a preprocessor, a parser, a compiler, a sea of nodes backend with 
 
 ---
 
-Although the compiler doesn't yet support a lot of C features, it is already in state, where it is capable of compiling the whole tokenizer (`parser/src/parser/tokenizer.c`), see the test `tester/src/tester/self_hosting/self_hosted_tokenizer_driver.c`.
-
-Examples of other programs:
-1. bubble sort (an example can be found in the test suite, [here](tests/compiler/test_for_loop_bubble_sort.c))
-2. a dynamic `int` array [examples/int_array.c](examples/int_array.c)
-3. quick sort [quick_sort.c](tests/compiler/examples/quick_sort.c)
-4. [arena allocator](tests/compiler/test_arena.c) which is used through out the whole codebase.
-
----
-
-Features and limitations:
+Features:
 
 1. `x64` machine code generation
-2. `cdecl` calling convention
-3. Support for using structs as function return types.
-4. Calling of external functions. These are provided inernally as function pointers by the compiler.
+2. `x64` calling convention on Windows
+3. Support for using structs as function argument and return types.
+4. Calling of external functions. These are provided internally as function pointers by the compiler.
 5. A custom [linker](code_gen/src/code_gen/backends/x64_linker.c) that enables compilation of multiple functions and source files into a single program.
 5. `char`, `int`, `short`, `long`, `long long` and their signed/unsigned variats with support for all binary and unary operators.
 6. Integer and pointer arithmetics.
@@ -53,22 +51,6 @@ Features and limitations:
 13. `#include`, `#error`, `#undef`, `#pragma once`
 14. Builtin macros: `__LINE__`, `__FILE__` and `__STDC__`
 15. Macros with variable number of arguments (`__VA_ARGS__`)
-
-# Project structure
-
-1. `builder/src` - a build tool for compiling the compiler
-2. `code_gen/src` - intermediate representation
-3. `code_gen/src/code_gen/backends/x64` - x64 backend
-4. `compiler/src` - compiler implementation
-5. `core/src` - common code: arenas, allocators, strings and OS abstractions
-6. `driver/src` - the entry point of the whole compiler
-7. `gen/src` - source code generators
-8. `parser/src` - parser and preprocessor
-9. `stdx/src` - some simplified versions of standard library headers, that are sometimes used to work around the limitations of the parser.
-10. `tester/src` - test runner and tests
-11. `tests/src` - preprocessor and compiler tests. Here every test is defined in it's own file. This directory is scanned by the `test_runner`, and adding new tests doesn't require recompiling the whole project.
-
-There are more detailed explanations for parts of the project. These are located in `docs/`.
 
 # How to build
 
@@ -119,7 +101,7 @@ When building with `MSVC` it is possible to compile with address sanitization, b
 
 ## Profiling
 
-`Cik` uses `Tracy 0.10.0` as the profiler.
+`Crankshaft` uses `Tracy 0.10.0` as the profiler.
 
 Building with the profiler support requires only passing the `--profiler` flag to the build tool.
 
