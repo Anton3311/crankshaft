@@ -570,11 +570,9 @@ static bool _parser_parse_struct_fields(Parser* parser,
 			_parser_skip_until(parser, TOKEN_SEMICOLON, TOKEN_RIGHT_BRACE);
 		} else if (!_parser_parse_declarator(parser, &field_type, &field_declarator, false)) {
 			_parser_skip_until(parser, TOKEN_SEMICOLON, TOKEN_RIGHT_BRACE);
-		} else {
-			assert(field_declarator.type.kind == TYPE_VOID);
 		}
 
-		if (field_type.kind == TYPE_VOID) {
+		if (field_declarator.type.kind == TYPE_VOID) {
 			// TODO: Need a surce range of the type. Declarator parsing might fail, and using it's
 			//       source range will be invalid
 			report_error(parser->diagnostics,
